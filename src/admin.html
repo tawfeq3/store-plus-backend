@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Store Plus - لوحة التحكم</title>
+  <link rel="stylesheet" href="/admin/admin.css">
+</head>
+
+<body>
+
+  <div id="loginPage" class="page">
+    <div class="card login-card">
+      <h1>Store Plus</h1>
+      <p>لوحة التحكم</p>
+
+      <input id="username" type="text" placeholder="اسم المستخدم">
+      <input id="password" type="password" placeholder="كلمة المرور">
+
+      <button onclick="login()">دخول</button>
+
+      <div id="loginError" class="error"></div>
+    </div>
+  </div>
+
+  <div id="dashboard" class="hidden">
+
+    <header>
+      <div>
+        <h1>Store Plus</h1>
+        <span>لوحة التحكم</span>
+      </div>
+
+      <button class="logout" onclick="logout()">تسجيل الخروج</button>
+    </header>
+
+    <main>
+
+      <section class="stats">
+
+        <div class="stat">
+          <span>المستخدمون</span>
+          <strong id="usersCount">0</strong>
+        </div>
+
+        <div class="stat">
+          <span>التطبيقات</span>
+          <strong id="appsCount">0</strong>
+        </div>
+
+        <div class="stat">
+          <span>التنزيلات</span>
+          <strong id="downloadsCount">0</strong>
+        </div>
+
+        <div class="stat">
+          <span>طلبات التثبيت</span>
+          <strong id="jobsCount">0</strong>
+        </div>
+
+      </section>
+
+      <section class="card">
+
+        <div class="section-title">
+          <h2>إضافة تطبيق</h2>
+        </div>
+
+        <div class="form-grid">
+
+          <input id="appName" placeholder="اسم التطبيق">
+
+          <input id="appVersion" placeholder="الإصدار">
+
+          <input id="appCategory" placeholder="التصنيف">
+
+          <input id="appIcon" placeholder="رابط الأيقونة">
+
+          <input id="appDescription" class="wide" placeholder="وصف التطبيق">
+
+          <label class="checkbox">
+            <input id="appFeatured" type="checkbox">
+            تطبيق مميز
+          </label>
+
+        </div>
+
+        <button onclick="addApp()">إضافة التطبيق</button>
+
+        <div id="appMessage"></div>
+
+      </section>
+
+      <section class="card">
+
+        <div class="section-title">
+          <h2>التطبيقات</h2>
+          <button onclick="loadApps()">تحديث</button>
+        </div>
+
+        <div id="appsList">
+          جاري التحميل...
+        </div>
+
+      </section>
+
+      <section class="card">
+
+        <div class="section-title">
+          <h2>المستخدمون</h2>
+          <button onclick="loadUsers()">تحديث</button>
+        </div>
+
+        <div id="usersList">
+          جاري التحميل...
+        </div>
+
+      </section>
+
+    </main>
+
+  </div>
+
+  <script src="/admin/admin.js"></script>
+</body>
+</html>
