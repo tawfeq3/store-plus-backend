@@ -31,7 +31,9 @@
         <span>لوحة التحكم</span>
       </div>
 
-      <button class="logout" onclick="logout()">تسجيل الخروج</button>
+      <button class="logout" onclick="logout()">
+        تسجيل الخروج
+      </button>
     </header>
 
     <main>
@@ -66,26 +68,74 @@
           <h2>إضافة تطبيق</h2>
         </div>
 
-        <div class="form-grid">
+        <form id="addAppForm">
 
-          <input id="appName" placeholder="اسم التطبيق">
+          <div class="form-grid">
 
-          <input id="appVersion" placeholder="الإصدار">
+            <input
+              id="appName"
+              name="name"
+              placeholder="اسم التطبيق"
+              required
+            >
 
-          <input id="appCategory" placeholder="التصنيف">
+            <input
+              id="appVersion"
+              name="version"
+              placeholder="الإصدار"
+              required
+            >
 
-          <input id="appIcon" placeholder="رابط الأيقونة">
+            <input
+              id="appCategory"
+              name="category"
+              placeholder="التصنيف"
+              required
+            >
 
-          <input id="appDescription" class="wide" placeholder="وصف التطبيق">
+            <input
+              id="appIcon"
+              name="iconURL"
+              type="url"
+              placeholder="رابط الأيقونة"
+            >
 
-          <label class="checkbox">
-            <input id="appFeatured" type="checkbox">
-            تطبيق مميز
-          </label>
+            <input
+              id="appDescription"
+              name="description"
+              class="wide"
+              placeholder="وصف التطبيق"
+              required
+            >
 
-        </div>
+            <label>
+              ملف التطبيق IPA
+            </label>
 
-        <button onclick="addApp()">إضافة التطبيق</button>
+            <input
+              id="appIPA"
+              name="ipa"
+              type="file"
+              accept=".ipa,application/octet-stream"
+              required
+            >
+
+            <label class="checkbox">
+              <input
+                id="appFeatured"
+                name="featured"
+                type="checkbox"
+              >
+              تطبيق مميز
+            </label>
+
+          </div>
+
+          <button type="submit">
+            إضافة التطبيق
+          </button>
+
+        </form>
 
         <div id="appMessage"></div>
 
@@ -95,7 +145,9 @@
 
         <div class="section-title">
           <h2>التطبيقات</h2>
-          <button onclick="loadApps()">تحديث</button>
+          <button onclick="loadApps()">
+            تحديث
+          </button>
         </div>
 
         <div id="appsList">
@@ -108,7 +160,9 @@
 
         <div class="section-title">
           <h2>المستخدمون</h2>
-          <button onclick="loadUsers()">تحديث</button>
+          <button onclick="loadUsers()">
+            تحديث
+          </button>
         </div>
 
         <div id="usersList">
@@ -124,3 +178,5 @@
   <script src="/admin/admin.js"></script>
 </body>
 </html>
+
+
