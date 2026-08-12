@@ -12,10 +12,6 @@ import crypto from "node:crypto";
 
 const { Pool } = pg;
 
-/* =========================
-   Database
-========================= */
-
 const db = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl:
@@ -23,10 +19,6 @@ const db = new Pool({
       ? { rejectUnauthorized: false }
       : undefined,
 });
-
-/* =========================
-   App
-========================= */
 
 const app = express();
 
@@ -38,44 +30,19 @@ app.use(
 
 app.use(express.json());
 
-/* =========================
-   Admin Dashboard
-========================= */
-
-const adminPath = path.join(
-  process.cwd(),
-  "src",
-  "admin"
-);
-
-app.use(
-  "/admin",
-  express.static(adminPath)
-);
-
-app.get("/admin", (_req, res) => {
-  res.sendFile(
-    path.join(adminPath, "admin.html")
-  );
-});
-
-/* =========================
-   Storage
-========================= */
-
 const root = path.resolve(
   process.env.STORAGE_ROOT || "/tmp/store-plus"
 );
 
-for (const directory of ["certificates", "jobs"]) {
+for (const directory of [
+  "certificates",
+  "jobs",
+  "apps",
+]) {
   fs.mkdirSync(path.join(root, directory), {
     recursive: true,
   });
 }
-
-/* =========================
-   Types
-========================= */
 
 type Req = express.Request & {
   user?: any;
@@ -99,6 +66,22 @@ async function ensureSchema() {
 
     await db.query(schema);
 
+    /*
+     * IPA information.
+     * IF NOT EXISTS prevents errors when the
+     * columns already exist.
+     */
+    await db.query(`
+      ALTER TABLE apps
+      ADD COLUMN IF NOT EXISTS ipa_ref TEXT;
+
+      ALTER TABLE apps
+      ADD COLUMN IF NOT EXISTS ipa_original_name TEXT;
+
+      ALTER TABLE apps
+      ADD COLUMN IF NOT EXISTS ipa_size BIGINT;
+    `);
+
     console.log(
       "Database schema initialized successfully."
     );
@@ -113,7 +96,7 @@ async function ensureSchema() {
 }
 
 /* =========================
-   Create Initial Admin
+   Initial Admin
 ========================= */
 
 async function ensureAdmin() {
@@ -351,7 +334,7 @@ app.post("/api/login", async (req, res) => {
 });
 
 /* =========================
-   Apps
+   Public Apps
 ========================= */
 
 app.get("/api/apps", async (_req, res) => {
@@ -365,6 +348,11 @@ app.get("/api/apps", async (_req, res) => {
         category,
         icon_url AS "iconURL",
         featured,
+        CASE
+          WHEN ipa_ref IS NOT NULL
+          THEN true
+          ELSE false
+        END AS "hasIPA",
         updated
       FROM apps
       WHERE active = true
@@ -383,6 +371,255 @@ app.get("/api/apps", async (_req, res) => {
     });
   }
 });
+
+/* =========================
+   Admin Add App + IPA
+========================= */
+
+const ipaUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => {
+      cb(
+        null,
+        path.join(root, "apps")
+      );
+    },
+
+    filename: (_req, file, cb) => {
+      const extension =
+        path.extname(file.originalname)
+          .toLowerCase();
+
+      const id =
+        crypto.randomUUID();
+
+      cb(
+        null,
+        id + extension
+      );
+    },
+  }),
+
+  limits: {
+    fileSize:
+      1024 * 1024 * 1024,
+  },
+
+  fileFilter: (_req, file, cb) => {
+    const extension =
+      path.extname(file.originalname)
+        .toLowerCase();
+
+    if (extension !== ".ipa") {
+      return cb(
+        new Error(
+          "Only .ipa files are allowed."
+        )
+      );
+    }
+
+    cb(null, true);
+  },
+});
+
+app.post(
+  "/api/admin/apps",
+  auth,
+  admin,
+  ipaUpload.single("ipa"),
+  async (req: Req, res) => {
+    try {
+      const {
+        name,
+        version,
+        category,
+        iconURL,
+        description,
+        featured,
+      } = req.body || {};
+
+      const ipa =
+        req.file;
+
+      if (
+        !name ||
+        !version ||
+        !category ||
+        !description ||
+        !ipa
+      ) {
+        if (ipa?.path) {
+          await fs.promises.unlink(
+            ipa.path
+          ).catch(() => {});
+        }
+
+        return res.status(400).json({
+          error:
+            "name_version_category_description_and_ipa_required",
+        });
+      }
+
+      const ipaRef =
+        path.basename(ipa.path);
+
+      const result =
+        await db.query(
+          `
+          INSERT INTO apps
+            (
+              name,
+              version,
+              description,
+              category,
+              icon_url,
+              featured,
+              active,
+              ipa_ref,
+              ipa_original_name,
+              ipa_size
+            )
+          VALUES
+            (
+              $1,
+              $2,
+              $3,
+              $4,
+              $5,
+              $6,
+              true,
+              $7,
+              $8,
+              $9
+            )
+          RETURNING
+            id,
+            name,
+            version,
+            description,
+            category,
+            icon_url AS "iconURL",
+            featured,
+            ipa_original_name AS "ipaName",
+            ipa_size AS "ipaSize"
+          `,
+          [
+            name.trim(),
+            version.trim(),
+            description.trim(),
+            category.trim(),
+            iconURL?.trim() || null,
+            featured === "true" ||
+              featured === true,
+            ipaRef,
+            ipa.originalname,
+            ipa.size,
+          ]
+        );
+
+      return res.status(201).json(
+        result.rows[0]
+      );
+    } catch (error) {
+      console.error(
+        "Add app error:",
+        error
+      );
+
+      if (req.file?.path) {
+        await fs.promises.unlink(
+          req.file.path
+        ).catch(() => {});
+      }
+
+      return res.status(500).json({
+        error: "app_creation_failed",
+      });
+    }
+  }
+);
+
+/* =========================
+   Download IPA
+========================= */
+
+app.get(
+  "/api/apps/:id/ipa",
+  async (req, res) => {
+    try {
+      const result =
+        await db.query(
+          `
+          SELECT
+            name,
+            ipa_ref,
+            ipa_original_name
+          FROM apps
+          WHERE id = $1
+            AND active = true
+            AND ipa_ref IS NOT NULL
+          LIMIT 1
+          `,
+          [req.params.id]
+        );
+
+      if (!result.rowCount) {
+        return res.status(404).json({
+          error: "ipa_not_found",
+        });
+      }
+
+      const appData =
+        result.rows[0];
+
+      const ipaPath =
+        path.join(
+          root,
+          "apps",
+          appData.ipa_ref
+        );
+
+      try {
+        await fs.promises.access(
+          ipaPath,
+          fs.constants.R_OK
+        );
+      } catch {
+        return res.status(404).json({
+          error:
+            "ipa_file_not_found",
+        });
+      }
+
+      res.setHeader(
+        "Content-Type",
+        "application/octet-stream"
+      );
+
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${encodeURIComponent(
+          appData.ipa_original_name ||
+            appData.name + ".ipa"
+        )}"`
+      );
+
+      return res.sendFile(
+        ipaPath
+      );
+    } catch (error) {
+      console.error(
+        "IPA download error:",
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          "ipa_download_failed",
+      });
+    }
+  }
+);
 
 /* =========================
    Install App
@@ -407,14 +644,17 @@ app.post(
 
       if (!certificate.rowCount) {
         return res.status(409).json({
-          error: "certificate_not_linked",
+          error:
+            "certificate_not_linked",
         });
       }
 
       const appResult =
         await db.query(
           `
-          SELECT id
+          SELECT
+            id,
+            ipa_ref
           FROM apps
           WHERE id = $1
             AND active = true
@@ -523,7 +763,8 @@ app.get(
       );
 
       return res.status(500).json({
-        error: "install_status_failed",
+        error:
+          "install_status_failed",
       });
     }
   }
@@ -587,6 +828,7 @@ app.get(
 const upload = multer({
   storage:
     multer.memoryStorage(),
+
   limits: {
     files: 2,
     fileSize:
@@ -773,11 +1015,6 @@ const PORT = Number(
 );
 
 async function startServer() {
-  /*
-   * Initialize database schema first,
-   * then create the initial Admin,
-   * then start accepting requests.
-   */
   await ensureSchema();
   await ensureAdmin();
 
