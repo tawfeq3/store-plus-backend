@@ -61,6 +61,37 @@ type Req = express.Request & {
 };
 
 /* =========================
+   Database Schema
+========================= */
+
+async function ensureSchema() {
+  try {
+    const schemaPath = path.resolve(
+      process.cwd(),
+      "schema.sql"
+    );
+
+    const schema = await fs.promises.readFile(
+      schemaPath,
+      "utf8"
+    );
+
+    await db.query(schema);
+
+    console.log(
+      "Database schema initialized successfully."
+    );
+  } catch (error) {
+    console.error(
+      "Database schema initialization error:",
+      error
+    );
+
+    throw error;
+  }
+}
+
+/* =========================
    Create Initial Admin
 ========================= */
 
@@ -722,9 +753,11 @@ const PORT = Number(
 
 async function startServer() {
   /*
-   * Create the initial Admin before
-   * accepting requests.
+   * Initialize database schema first,
+   * then create the initial Admin,
+   * then start accepting requests.
    */
+  await ensureSchema();
   await ensureAdmin();
 
   app.listen(
@@ -746,3 +779,5 @@ startServer().catch((error) => {
 
   process.exit(1);
 });
+
+
