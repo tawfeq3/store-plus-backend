@@ -22,27 +22,44 @@ const db = new Pool({
 
 const app = express();
 
+/* =========================
+   CORS
+========================= */
+
 app.use(
   cors({
     origin: process.env.CORS_ORIGIN || "*",
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true }));
+
+/* =========================
+   Storage
+========================= */
 
 const root = path.resolve(
   process.env.STORAGE_ROOT || "/tmp/store-plus"
 );
 
-for (const directory of [
+const storageDirectories = [
   "certificates",
   "jobs",
   "apps",
-]) {
+];
+
+for (const directory of storageDirectories) {
   fs.mkdirSync(path.join(root, directory), {
     recursive: true,
   });
 }
+
+/* =========================
+   Request Type
+========================= */
 
 type Req = express.Request & {
   user?: any;
@@ -59,17 +76,19 @@ async function ensureSchema() {
       "schema.sql"
     );
 
-    const schema = await fs.promises.readFile(
-      schemaPath,
-      "utf8"
-    );
+    if (fs.existsSync(schemaPath)) {
+      const schema = await fs.promises.readFile(
+        schemaPath,
+        "utf8"
+      );
 
-    await db.query(schema);
+      if (schema.trim()) {
+        await db.query(schema);
+      }
+    }
 
     /*
-     * IPA information.
-     * IF NOT EXISTS prevents errors when the
-     * columns already exist.
+     * IPA fields
      */
     await db.query(`
       ALTER TABLE apps
@@ -80,6 +99,17 @@ async function ensureSchema() {
 
       ALTER TABLE apps
       ADD COLUMN IF NOT EXISTS ipa_size BIGINT;
+    `);
+
+    /*
+     * Helpful app fields if they don't exist.
+     */
+    await db.query(`
+      ALTER TABLE apps
+      ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true;
+
+      ALTER TABLE apps
+      ADD COLUMN IF NOT EXISTS featured BOOLEAN DEFAULT false;
     `);
 
     console.log(
@@ -195,9 +225,12 @@ const auth = (
   next: express.NextFunction
 ) => {
   try {
-    const token = (
-      req.header("authorization") || ""
-    ).replace(/^Bearer /, "");
+    const authorization =
+      req.header("authorization") || "";
+
+    const token = authorization
+      .replace(/^Bearer\s+/i, "")
+      .trim();
 
     if (!token) {
       return res.status(401).json({
@@ -210,7 +243,7 @@ const auth = (
       process.env.JWT_SECRET!
     );
 
-    next();
+    return next();
   } catch {
     return res.status(401).json({
       error: "unauthorized",
@@ -246,9 +279,14 @@ app.get("/api/health", async (_req, res) => {
 
     return res.json({
       ok: true,
-      version: "9.0.0",
+      version: "10.0.0",
     });
-  } catch {
+  } catch (error) {
+    console.error(
+      "Health check error:",
+      error
+    );
+
     return res.status(503).json({
       ok: false,
     });
@@ -261,10 +299,11 @@ app.get("/api/health", async (_req, res) => {
 
 app.post("/api/login", async (req, res) => {
   try {
-    const {
-      username,
-      password,
-    } = req.body || {};
+    const username =
+      String(req.body?.username || "").trim();
+
+    const password =
+      String(req.body?.password || "");
 
     if (!username || !password) {
       return res.status(400).json({
@@ -283,23 +322,30 @@ app.post("/api/login", async (req, res) => {
       FROM users
       WHERE username = $1
         AND active = true
+      LIMIT 1
       `,
       [username]
     );
 
-    if (
-      !result.rowCount ||
-      !(await bcrypt.compare(
-        password || "",
-        result.rows[0].password_hash
-      ))
-    ) {
+    if (!result.rowCount) {
       return res.status(401).json({
         error: "invalid_credentials",
       });
     }
 
     const user = result.rows[0];
+
+    const validPassword =
+      await bcrypt.compare(
+        password,
+        user.password_hash
+      );
+
+    if (!validPassword) {
+      return res.status(401).json({
+        error: "invalid_credentials",
+      });
+    }
 
     const token = jwt.sign(
       {
@@ -353,6 +399,8 @@ app.get("/api/apps", async (_req, res) => {
           THEN true
           ELSE false
         END AS "hasIPA",
+        ipa_original_name AS "ipaName",
+        ipa_size AS "ipaSize",
         updated
       FROM apps
       WHERE active = true
@@ -373,7 +421,49 @@ app.get("/api/apps", async (_req, res) => {
 });
 
 /* =========================
-   Admin Add App + IPA
+   Admin Apps List
+========================= */
+
+app.get(
+  "/api/admin/apps",
+  auth,
+  admin,
+  async (_req, res) => {
+    try {
+      const result = await db.query(`
+        SELECT
+          id,
+          name,
+          version,
+          description,
+          category,
+          icon_url AS "iconURL",
+          featured,
+          active,
+          ipa_ref IS NOT NULL AS "hasIPA",
+          ipa_original_name AS "ipaName",
+          ipa_size AS "ipaSize",
+          updated
+        FROM apps
+        ORDER BY updated_at DESC
+      `);
+
+      return res.json(result.rows);
+    } catch (error) {
+      console.error(
+        "Admin apps error:",
+        error
+      );
+
+      return res.status(500).json({
+        error: "admin_apps_failed",
+      });
+    }
+  }
+);
+
+/* =========================
+   IPA Upload
 ========================= */
 
 const ipaUpload = multer({
@@ -387,28 +477,33 @@ const ipaUpload = multer({
 
     filename: (_req, file, cb) => {
       const extension =
-        path.extname(file.originalname)
-          .toLowerCase();
+        path.extname(
+          file.originalname || ""
+        ).toLowerCase();
 
       const id =
         crypto.randomUUID();
 
       cb(
         null,
-        id + extension
+        `${id}${extension || ".ipa"}`
       );
     },
   }),
 
   limits: {
+    /*
+     * Maximum IPA size = 1 GB
+     */
     fileSize:
       1024 * 1024 * 1024,
   },
 
   fileFilter: (_req, file, cb) => {
     const extension =
-      path.extname(file.originalname)
-        .toLowerCase();
+      path.extname(
+        file.originalname || ""
+      ).toLowerCase();
 
     if (extension !== ".ipa") {
       return cb(
@@ -418,29 +513,100 @@ const ipaUpload = multer({
       );
     }
 
-    cb(null, true);
+    return cb(null, true);
   },
 });
 
+/* =========================
+   Admin Add App + IPA
+========================= */
+
+/*
+ * Frontend can send the IPA using any
+ * of these field names:
+ *
+ * ipa
+ * ipaFile
+ * file
+ *
+ * The frontend should preferably use:
+ *
+ * ipa
+ */
 app.post(
   "/api/admin/apps",
   auth,
   admin,
-  ipaUpload.single("ipa"),
+  ipaUpload.fields([
+    {
+      name: "ipa",
+      maxCount: 1,
+    },
+    {
+      name: "ipaFile",
+      maxCount: 1,
+    },
+    {
+      name: "file",
+      maxCount: 1,
+    },
+  ]),
   async (req: Req, res) => {
+    let ipa:
+      | Express.Multer.File
+      | undefined;
+
     try {
-      const {
-        name,
-        version,
-        category,
-        iconURL,
-        description,
-        featured,
-      } = req.body || {};
+      const files =
+        req.files as
+          | {
+              ipa?: Express.Multer.File[];
+              ipaFile?: Express.Multer.File[];
+              file?: Express.Multer.File[];
+            }
+          | undefined;
 
-      const ipa =
-        req.file;
+      ipa =
+        files?.ipa?.[0] ||
+        files?.ipaFile?.[0] ||
+        files?.file?.[0];
 
+      const name =
+        String(
+          req.body?.name || ""
+        ).trim();
+
+      const version =
+        String(
+          req.body?.version || ""
+        ).trim();
+
+      const category =
+        String(
+          req.body?.category || ""
+        ).trim();
+
+      const description =
+        String(
+          req.body?.description || ""
+        ).trim();
+
+      const iconURL =
+        String(
+          req.body?.iconURL ||
+          req.body?.iconUrl ||
+          ""
+        ).trim();
+
+      const featured =
+        req.body?.featured === true ||
+        req.body?.featured === "true" ||
+        req.body?.featured === "1";
+
+      /*
+       * الاسم والإصدار والفئة والوصف وIPA
+       * مطلوبة.
+       */
       if (
         !name ||
         !version ||
@@ -449,20 +615,33 @@ app.post(
         !ipa
       ) {
         if (ipa?.path) {
-          await fs.promises.unlink(
-            ipa.path
-          ).catch(() => {});
+          await fs.promises
+            .unlink(ipa.path)
+            .catch(() => {});
         }
 
         return res.status(400).json({
           error:
             "name_version_category_description_and_ipa_required",
+
+          required: {
+            name: !name,
+            version: !version,
+            category: !category,
+            description: !description,
+            ipa: !ipa,
+          },
         });
       }
 
       const ipaRef =
-        path.basename(ipa.path);
+        path.basename(
+          ipa.path
+        );
 
+      /*
+       * Save app in database.
+       */
       const result =
         await db.query(
           `
@@ -500,40 +679,46 @@ app.post(
             category,
             icon_url AS "iconURL",
             featured,
+            active,
             ipa_original_name AS "ipaName",
-            ipa_size AS "ipaSize"
+            ipa_size AS "ipaSize",
+            true AS "hasIPA"
           `,
           [
-            name.trim(),
-            version.trim(),
-            description.trim(),
-            category.trim(),
-            iconURL?.trim() || null,
-            featured === "true" ||
-              featured === true,
+            name,
+            version,
+            description,
+            category,
+            iconURL || null,
+            featured,
             ipaRef,
             ipa.originalname,
             ipa.size,
           ]
         );
 
-      return res.status(201).json(
-        result.rows[0]
-      );
+      return res.status(201).json({
+        ok: true,
+        app: result.rows[0],
+      });
     } catch (error) {
       console.error(
         "Add app error:",
         error
       );
 
-      if (req.file?.path) {
-        await fs.promises.unlink(
-          req.file.path
-        ).catch(() => {});
+      if (ipa?.path) {
+        await fs.promises
+          .unlink(ipa.path)
+          .catch(() => {});
       }
 
       return res.status(500).json({
         error: "app_creation_failed",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unknown error",
       });
     }
   }
@@ -551,6 +736,7 @@ app.get(
         await db.query(
           `
           SELECT
+            id,
             name,
             ipa_ref,
             ipa_original_name
@@ -576,7 +762,9 @@ app.get(
         path.join(
           root,
           "apps",
-          appData.ipa_ref
+          path.basename(
+            appData.ipa_ref
+          )
         );
 
       try {
@@ -591,6 +779,10 @@ app.get(
         });
       }
 
+      const filename =
+        appData.ipa_original_name ||
+        `${appData.name}.ipa`;
+
       res.setHeader(
         "Content-Type",
         "application/octet-stream"
@@ -599,8 +791,7 @@ app.get(
       res.setHeader(
         "Content-Disposition",
         `attachment; filename="${encodeURIComponent(
-          appData.ipa_original_name ||
-            appData.name + ".ipa"
+          filename
         )}"`
       );
 
@@ -622,6 +813,75 @@ app.get(
 );
 
 /* =========================
+   Delete App
+========================= */
+
+app.delete(
+  "/api/admin/apps/:id",
+  auth,
+  admin,
+  async (req: Req, res) => {
+    try {
+      const result =
+        await db.query(
+          `
+          SELECT
+            ipa_ref
+          FROM apps
+          WHERE id = $1
+          LIMIT 1
+          `,
+          [req.params.id]
+        );
+
+      if (!result.rowCount) {
+        return res.status(404).json({
+          error: "app_not_found",
+        });
+      }
+
+      const ipaRef =
+        result.rows[0].ipa_ref;
+
+      await db.query(
+        `
+        DELETE FROM apps
+        WHERE id = $1
+        `,
+        [req.params.id]
+      );
+
+      if (ipaRef) {
+        const ipaPath =
+          path.join(
+            root,
+            "apps",
+            path.basename(ipaRef)
+          );
+
+        await fs.promises
+          .unlink(ipaPath)
+          .catch(() => {});
+      }
+
+      return res.json({
+        ok: true,
+      });
+    } catch (error) {
+      console.error(
+        "Delete app error:",
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          "app_delete_failed",
+      });
+    }
+  }
+);
+
+/* =========================
    Install App
 ========================= */
 
@@ -630,6 +890,17 @@ app.post(
   auth,
   async (req: Req, res) => {
     try {
+      const appID =
+        req.body?.appID ||
+        req.body?.appId ||
+        req.body?.id;
+
+      if (!appID) {
+        return res.status(400).json({
+          error: "app_id_required",
+        });
+      }
+
       const certificate =
         await db.query(
           `
@@ -658,13 +929,20 @@ app.post(
           FROM apps
           WHERE id = $1
             AND active = true
+          LIMIT 1
           `,
-          [req.body?.appID]
+          [appID]
         );
 
       if (!appResult.rowCount) {
         return res.status(404).json({
           error: "app_not_found",
+        });
+      }
+
+      if (!appResult.rows[0].ipa_ref) {
+        return res.status(409).json({
+          error: "app_has_no_ipa",
         });
       }
 
@@ -695,7 +973,7 @@ app.post(
           `,
           [
             req.user.id,
-            req.body.appID,
+            appID,
             certificate.rows[0].id,
           ]
         );
@@ -789,22 +1067,30 @@ app.get(
         db.query(
           "SELECT count(*)::int AS n FROM users"
         ),
+
         db.query(
           "SELECT count(*)::int AS n FROM apps"
         ),
+
         db.query(
           "SELECT count(*)::int AS n FROM downloads"
         ),
+
         db.query(
           "SELECT count(*)::int AS n FROM install_jobs"
         ),
       ]);
 
       return res.json({
-        users: users.rows[0].n,
-        apps: apps.rows[0].n,
+        users:
+          users.rows[0].n,
+
+        apps:
+          apps.rows[0].n,
+
         downloads:
           downloads.rows[0].n,
+
         installJobs:
           installJobs.rows[0].n,
       });
@@ -825,22 +1111,23 @@ app.get(
    Certificate Upload
 ========================= */
 
-const upload = multer({
-  storage:
-    multer.memoryStorage(),
+const certificateUpload =
+  multer({
+    storage:
+      multer.memoryStorage(),
 
-  limits: {
-    files: 2,
-    fileSize:
-      10 * 1024 * 1024,
-  },
-});
+    limits: {
+      files: 2,
+      fileSize:
+        10 * 1024 * 1024,
+    },
+  });
 
 app.post(
   "/api/admin/certificates/upload",
   auth,
   admin,
-  upload.fields([
+  certificateUpload.fields([
     {
       name: "p12",
       maxCount: 1,
@@ -867,7 +1154,7 @@ app.post(
       const userID =
         String(
           req.body?.userID || ""
-        );
+        ).trim();
 
       if (
         !userID ||
@@ -899,8 +1186,7 @@ app.post(
         path.join(
           root,
           "certificates",
-          certificateRef +
-            ".p12"
+          `${certificateRef}.p12`
         ),
         p12.buffer
       );
@@ -909,8 +1195,7 @@ app.post(
         path.join(
           root,
           "certificates",
-          profileRef +
-            ".mobileprovision"
+          `${profileRef}.mobileprovision`
         ),
         mobileprovision.buffer
       );
@@ -938,8 +1223,12 @@ app.post(
           `,
           [
             userID,
-            req.body?.label ||
-              "Certificate",
+
+            String(
+              req.body?.label ||
+                "Certificate"
+            ).trim(),
+
             certificateRef,
             profileRef,
           ]
@@ -1007,6 +1296,80 @@ app.get(
 );
 
 /* =========================
+   API 404
+========================= */
+
+app.use(
+  "/api",
+  (_req, res) => {
+    return res.status(404).json({
+      error: "api_route_not_found",
+    });
+  }
+);
+
+/* =========================
+   Multer / General Errors
+========================= */
+
+app.use(
+  (
+    error: any,
+    _req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction
+  ) => {
+    console.error(
+      "Server error:",
+      error
+    );
+
+    if (
+      error instanceof multer.MulterError
+    ) {
+      if (
+        error.code ===
+        "LIMIT_FILE_SIZE"
+      ) {
+        return res.status(413).json({
+          error:
+            "ipa_file_too_large",
+          message:
+            "حجم الملف أكبر من الحد المسموح به وهو 1GB.",
+        });
+      }
+
+      return res.status(400).json({
+        error:
+          "file_upload_error",
+        message:
+          error.message,
+      });
+    }
+
+    if (
+      error?.message ===
+      "Only .ipa files are allowed."
+    ) {
+      return res.status(400).json({
+        error:
+          "invalid_ipa_file",
+        message:
+          "يجب اختيار ملف بصيغة IPA.",
+      });
+    }
+
+    return res.status(500).json({
+      error:
+        "internal_server_error",
+      message:
+        error?.message ||
+        "Unknown server error",
+    });
+  }
+);
+
+/* =========================
    Start Server
 ========================= */
 
@@ -1016,6 +1379,7 @@ const PORT = Number(
 
 async function startServer() {
   await ensureSchema();
+
   await ensureAdmin();
 
   app.listen(
@@ -1023,7 +1387,11 @@ async function startServer() {
     "0.0.0.0",
     () => {
       console.log(
-        `Store Plus API v9 ready on port ${PORT}`
+        `Store Plus API v10 ready on port ${PORT}`
+      );
+
+      console.log(
+        `Storage root: ${root}`
       );
     }
   );
@@ -1037,5 +1405,3 @@ startServer().catch((error) => {
 
   process.exit(1);
 });
-
-
