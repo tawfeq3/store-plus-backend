@@ -8,6 +8,6 @@
     "strict": true,
     "skipLibCheck": true
   },
-  "include": ["*.ts", "src/**/*.ts"],
+  "include": ["server.ts", "src/**/*.ts"],
   "exclude": ["dist"]
 }
