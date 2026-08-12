@@ -329,15 +329,17 @@ app.post(
       { mode: 0o600 }
     );
 
-    await fs.writeFile(
-      path.join(
-        root,
-        "certificates",
-        prof + ".mobileprovision"
-      ),
-      m.buffer,
-      { mode: 0o600 }
-    );
+    await fs.promises.writeFile(
+  path.join(root, "certificates", ref + ".p12"),
+  p.buffer,
+  { mode: 0o600 }
+);
+
+await fs.promises.writeFile(
+  path.join(root, "certificates", prof + ".mobileprovision"),
+  m.buffer,
+  { mode: 0o600 }
+);
 
     const result = await db.query(
       `
