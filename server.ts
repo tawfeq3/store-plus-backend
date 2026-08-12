@@ -29,8 +29,18 @@ const app = express();
 app.use(
   cors({
     origin: process.env.CORS_ORIGIN || "*",
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    methods: [
+      "GET",
+      "POST",
+      "PUT",
+      "PATCH",
+      "DELETE",
+      "OPTIONS",
+    ],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+    ],
   })
 );
 
@@ -38,11 +48,81 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
 /* =========================
+   Admin Panel Static Files
+========================= */
+
+const adminDir = path.resolve(
+  process.cwd(),
+  "src",
+  "admin"
+);
+
+/*
+ * يخدم:
+ *
+ * /admin/admin.html
+ * /admin/admin.css
+ * /admin/admin.js
+ */
+app.use(
+  "/admin",
+  express.static(adminDir, {
+    index: "admin.html",
+  })
+);
+
+/*
+ * /admin
+ */
+app.get(
+  "/admin",
+  (_req, res) => {
+    return res.sendFile(
+      path.join(
+        adminDir,
+        "admin.html"
+      )
+    );
+  }
+);
+
+/*
+ * /admin/
+ */
+app.get(
+  "/admin/",
+  (_req, res) => {
+    return res.sendFile(
+      path.join(
+        adminDir,
+        "admin.html"
+      )
+    );
+  }
+);
+
+/*
+ * /admin/admin.html
+ */
+app.get(
+  "/admin/admin.html",
+  (_req, res) => {
+    return res.sendFile(
+      path.join(
+        adminDir,
+        "admin.html"
+      )
+    );
+  }
+);
+
+/* =========================
    Storage
 ========================= */
 
 const root = path.resolve(
-  process.env.STORAGE_ROOT || "/tmp/store-plus"
+  process.env.STORAGE_ROOT ||
+    "/tmp/store-plus"
 );
 
 const storageDirectories = [
@@ -52,9 +132,12 @@ const storageDirectories = [
 ];
 
 for (const directory of storageDirectories) {
-  fs.mkdirSync(path.join(root, directory), {
-    recursive: true,
-  });
+  fs.mkdirSync(
+    path.join(root, directory),
+    {
+      recursive: true,
+    }
+  );
 }
 
 /* =========================
@@ -77,10 +160,11 @@ async function ensureSchema() {
     );
 
     if (fs.existsSync(schemaPath)) {
-      const schema = await fs.promises.readFile(
-        schemaPath,
-        "utf8"
-      );
+      const schema =
+        await fs.promises.readFile(
+          schemaPath,
+          "utf8"
+        );
 
       if (schema.trim()) {
         await db.query(schema);
@@ -102,7 +186,7 @@ async function ensureSchema() {
     `);
 
     /*
-     * Helpful app fields if they don't exist.
+     * App fields
      */
     await db.query(`
       ALTER TABLE apps
@@ -157,15 +241,16 @@ async function ensureAdmin() {
       return;
     }
 
-    const existing = await db.query(
-      `
-      SELECT id
-      FROM users
-      WHERE username = $1
-      LIMIT 1
-      `,
-      [username]
-    );
+    const existing =
+      await db.query(
+        `
+        SELECT id
+        FROM users
+        WHERE username = $1
+        LIMIT 1
+        `,
+        [username]
+      );
 
     if (existing.rowCount) {
       console.log(
@@ -176,7 +261,10 @@ async function ensureAdmin() {
     }
 
     const passwordHash =
-      await bcrypt.hash(password, 12);
+      await bcrypt.hash(
+        password,
+        12
+      );
 
     await db.query(
       `
@@ -226,11 +314,17 @@ const auth = (
 ) => {
   try {
     const authorization =
-      req.header("authorization") || "";
+      req.header(
+        "authorization"
+      ) || "";
 
-    const token = authorization
-      .replace(/^Bearer\s+/i, "")
-      .trim();
+    const token =
+      authorization
+        .replace(
+          /^Bearer\s+/i,
+          ""
+        )
+        .trim();
 
     if (!token) {
       return res.status(401).json({
@@ -238,10 +332,11 @@ const auth = (
       });
     }
 
-    req.user = jwt.verify(
-      token,
-      process.env.JWT_SECRET!
-    );
+    req.user =
+      jwt.verify(
+        token,
+        process.env.JWT_SECRET!
+      );
 
     return next();
   } catch {
@@ -252,7 +347,7 @@ const auth = (
 };
 
 /* =========================
-   Admin
+   Admin Middleware
 ========================= */
 
 const admin = (
@@ -260,7 +355,10 @@ const admin = (
   res: express.Response,
   next: express.NextFunction
 ) => {
-  if (req.user?.role === "admin") {
+  if (
+    req.user?.role ===
+    "admin"
+  ) {
     return next();
   }
 
@@ -273,152 +371,192 @@ const admin = (
    Health
 ========================= */
 
-app.get("/api/health", async (_req, res) => {
-  try {
-    await db.query("SELECT 1");
+app.get(
+  "/api/health",
+  async (_req, res) => {
+    try {
+      await db.query(
+        "SELECT 1"
+      );
 
-    return res.json({
-      ok: true,
-      version: "10.0.0",
-    });
-  } catch (error) {
-    console.error(
-      "Health check error:",
-      error
-    );
+      return res.json({
+        ok: true,
+        version: "11.0.0",
+      });
+    } catch (error) {
+      console.error(
+        "Health check error:",
+        error
+      );
 
-    return res.status(503).json({
-      ok: false,
-    });
+      return res.status(503).json({
+        ok: false,
+      });
+    }
   }
-});
+);
 
 /* =========================
    Login
 ========================= */
 
-app.post("/api/login", async (req, res) => {
-  try {
-    const username =
-      String(req.body?.username || "").trim();
+app.post(
+  "/api/login",
+  async (req, res) => {
+    try {
+      const username =
+        String(
+          req.body?.username ||
+            ""
+        ).trim();
 
-    const password =
-      String(req.body?.password || "");
+      const password =
+        String(
+          req.body?.password ||
+            ""
+        );
 
-    if (!username || !password) {
-      return res.status(400).json({
-        error: "username_and_password_required",
+      if (
+        !username ||
+        !password
+      ) {
+        return res.status(400).json({
+          error:
+            "username_and_password_required",
+        });
+      }
+
+      const result =
+        await db.query(
+          `
+          SELECT
+            id,
+            username,
+            password_hash,
+            name,
+            role
+          FROM users
+          WHERE username = $1
+            AND active = true
+          LIMIT 1
+          `,
+          [username]
+        );
+
+      if (!result.rowCount) {
+        return res.status(401).json({
+          error:
+            "invalid_credentials",
+        });
+      }
+
+      const user =
+        result.rows[0];
+
+      const validPassword =
+        await bcrypt.compare(
+          password,
+          user.password_hash
+        );
+
+      if (!validPassword) {
+        return res.status(401).json({
+          error:
+            "invalid_credentials",
+        });
+      }
+
+      const token =
+        jwt.sign(
+          {
+            id: user.id,
+            role: user.role,
+          },
+          process.env.JWT_SECRET!,
+          {
+            expiresIn:
+              "30d",
+          }
+        );
+
+      return res.json({
+        token,
+        user: {
+          id: user.id,
+          username:
+            user.username,
+          name: user.name,
+          role: user.role,
+        },
       });
-    }
-
-    const result = await db.query(
-      `
-      SELECT
-        id,
-        username,
-        password_hash,
-        name,
-        role
-      FROM users
-      WHERE username = $1
-        AND active = true
-      LIMIT 1
-      `,
-      [username]
-    );
-
-    if (!result.rowCount) {
-      return res.status(401).json({
-        error: "invalid_credentials",
-      });
-    }
-
-    const user = result.rows[0];
-
-    const validPassword =
-      await bcrypt.compare(
-        password,
-        user.password_hash
+    } catch (error) {
+      console.error(
+        "Login error:",
+        error
       );
 
-    if (!validPassword) {
-      return res.status(401).json({
-        error: "invalid_credentials",
+      return res.status(500).json({
+        error:
+          "login_failed",
       });
     }
-
-    const token = jwt.sign(
-      {
-        id: user.id,
-        role: user.role,
-      },
-      process.env.JWT_SECRET!,
-      {
-        expiresIn: "30d",
-      }
-    );
-
-    return res.json({
-      token,
-      user: {
-        id: user.id,
-        username: user.username,
-        name: user.name,
-        role: user.role,
-      },
-    });
-  } catch (error) {
-    console.error(
-      "Login error:",
-      error
-    );
-
-    return res.status(500).json({
-      error: "login_failed",
-    });
   }
-});
+);
 
 /* =========================
    Public Apps
 ========================= */
 
-app.get("/api/apps", async (_req, res) => {
-  try {
-    const result = await db.query(`
-      SELECT
-        id,
-        name,
-        version,
-        description,
-        category,
-        icon_url AS "iconURL",
-        featured,
-        CASE
-          WHEN ipa_ref IS NOT NULL
-          THEN true
-          ELSE false
-        END AS "hasIPA",
-        ipa_original_name AS "ipaName",
-        ipa_size AS "ipaSize",
-        updated
-      FROM apps
-      WHERE active = true
-      ORDER BY featured DESC, updated_at DESC
-    `);
+app.get(
+  "/api/apps",
+  async (_req, res) => {
+    try {
+      const result =
+        await db.query(`
+          SELECT
+            id,
+            name,
+            version,
+            description,
+            category,
+            icon_url AS "iconURL",
+            featured,
 
-    return res.json(result.rows);
-  } catch (error) {
-    console.error(
-      "Apps error:",
-      error
-    );
+            CASE
+              WHEN ipa_ref IS NOT NULL
+              THEN true
+              ELSE false
+            END AS "hasIPA",
 
-    return res.status(500).json({
-      error: "apps_failed",
-    });
+            ipa_original_name AS "ipaName",
+            ipa_size AS "ipaSize",
+            updated
+
+          FROM apps
+
+          WHERE active = true
+
+          ORDER BY
+            featured DESC,
+            updated_at DESC
+        `);
+
+      return res.json(
+        result.rows
+      );
+    } catch (error) {
+      console.error(
+        "Apps error:",
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          "apps_failed",
+      });
+    }
   }
-});
+);
 
 /* =========================
    Admin Apps List
@@ -430,25 +568,35 @@ app.get(
   admin,
   async (_req, res) => {
     try {
-      const result = await db.query(`
-        SELECT
-          id,
-          name,
-          version,
-          description,
-          category,
-          icon_url AS "iconURL",
-          featured,
-          active,
-          ipa_ref IS NOT NULL AS "hasIPA",
-          ipa_original_name AS "ipaName",
-          ipa_size AS "ipaSize",
-          updated
-        FROM apps
-        ORDER BY updated_at DESC
-      `);
+      const result =
+        await db.query(`
+          SELECT
+            id,
+            name,
+            version,
+            description,
+            category,
+            icon_url AS "iconURL",
+            featured,
+            active,
 
-      return res.json(result.rows);
+            (
+              ipa_ref IS NOT NULL
+            ) AS "hasIPA",
+
+            ipa_original_name AS "ipaName",
+            ipa_size AS "ipaSize",
+            updated
+
+          FROM apps
+
+          ORDER BY
+            updated_at DESC
+        `);
+
+      return res.json(
+        result.rows
+      );
     } catch (error) {
       console.error(
         "Admin apps error:",
@@ -456,7 +604,8 @@ app.get(
       );
 
       return res.status(500).json({
-        error: "admin_apps_failed",
+        error:
+          "admin_apps_failed",
       });
     }
   }
@@ -466,77 +615,93 @@ app.get(
    IPA Upload
 ========================= */
 
-const ipaUpload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => {
-      cb(
-        null,
-        path.join(root, "apps")
-      );
+const ipaUpload =
+  multer({
+    storage:
+      multer.diskStorage({
+        destination:
+          (
+            _req,
+            _file,
+            cb
+          ) => {
+            cb(
+              null,
+              path.join(
+                root,
+                "apps"
+              )
+            );
+          },
+
+        filename:
+          (
+            _req,
+            file,
+            cb
+          ) => {
+            const extension =
+              path.extname(
+                file.originalname ||
+                  ""
+              ).toLowerCase();
+
+            const id =
+              crypto.randomUUID();
+
+            cb(
+              null,
+              `${id}${extension || ".ipa"}`
+            );
+          },
+      }),
+
+    limits: {
+      fileSize:
+        1024 *
+        1024 *
+        1024,
     },
 
-    filename: (_req, file, cb) => {
-      const extension =
-        path.extname(
-          file.originalname || ""
-        ).toLowerCase();
+    fileFilter:
+      (
+        _req,
+        file,
+        cb
+      ) => {
+        const extension =
+          path.extname(
+            file.originalname ||
+              ""
+          ).toLowerCase();
 
-      const id =
-        crypto.randomUUID();
+        if (
+          extension !==
+          ".ipa"
+        ) {
+          return cb(
+            new Error(
+              "Only .ipa files are allowed."
+            )
+          );
+        }
 
-      cb(
-        null,
-        `${id}${extension || ".ipa"}`
-      );
-    },
-  }),
-
-  limits: {
-    /*
-     * Maximum IPA size = 1 GB
-     */
-    fileSize:
-      1024 * 1024 * 1024,
-  },
-
-  fileFilter: (_req, file, cb) => {
-    const extension =
-      path.extname(
-        file.originalname || ""
-      ).toLowerCase();
-
-    if (extension !== ".ipa") {
-      return cb(
-        new Error(
-          "Only .ipa files are allowed."
-        )
-      );
-    }
-
-    return cb(null, true);
-  },
-});
+        return cb(
+          null,
+          true
+        );
+      },
+  });
 
 /* =========================
    Admin Add App + IPA
 ========================= */
 
-/*
- * Frontend can send the IPA using any
- * of these field names:
- *
- * ipa
- * ipaFile
- * file
- *
- * The frontend should preferably use:
- *
- * ipa
- */
 app.post(
   "/api/admin/apps",
   auth,
   admin,
+
   ipaUpload.fields([
     {
       name: "ipa",
@@ -551,7 +716,11 @@ app.post(
       maxCount: 1,
     },
   ]),
-  async (req: Req, res) => {
+
+  async (
+    req: Req,
+    res
+  ) => {
     let ipa:
       | Express.Multer.File
       | undefined;
@@ -573,40 +742,43 @@ app.post(
 
       const name =
         String(
-          req.body?.name || ""
+          req.body?.name ||
+            ""
         ).trim();
 
       const version =
         String(
-          req.body?.version || ""
+          req.body?.version ||
+            ""
         ).trim();
 
       const category =
         String(
-          req.body?.category || ""
+          req.body?.category ||
+            ""
         ).trim();
 
       const description =
         String(
-          req.body?.description || ""
+          req.body?.description ||
+            ""
         ).trim();
 
       const iconURL =
         String(
           req.body?.iconURL ||
-          req.body?.iconUrl ||
-          ""
+            req.body?.iconUrl ||
+            ""
         ).trim();
 
       const featured =
-        req.body?.featured === true ||
-        req.body?.featured === "true" ||
-        req.body?.featured === "1";
+        req.body?.featured ===
+          true ||
+        req.body?.featured ===
+          "true" ||
+        req.body?.featured ===
+          "1";
 
-      /*
-       * الاسم والإصدار والفئة والوصف وIPA
-       * مطلوبة.
-       */
       if (
         !name ||
         !version ||
@@ -616,8 +788,12 @@ app.post(
       ) {
         if (ipa?.path) {
           await fs.promises
-            .unlink(ipa.path)
-            .catch(() => {});
+            .unlink(
+              ipa.path
+            )
+            .catch(
+              () => {}
+            );
         }
 
         return res.status(400).json({
@@ -626,9 +802,12 @@ app.post(
 
           required: {
             name: !name,
-            version: !version,
-            category: !category,
-            description: !description,
+            version:
+              !version,
+            category:
+              !category,
+            description:
+              !description,
             ipa: !ipa,
           },
         });
@@ -639,9 +818,6 @@ app.post(
           ipa.path
         );
 
-      /*
-       * Save app in database.
-       */
       const result =
         await db.query(
           `
@@ -658,6 +834,7 @@ app.post(
               ipa_original_name,
               ipa_size
             )
+
           VALUES
             (
               $1,
@@ -671,6 +848,7 @@ app.post(
               $8,
               $9
             )
+
           RETURNING
             id,
             name,
@@ -689,7 +867,8 @@ app.post(
             version,
             description,
             category,
-            iconURL || null,
+            iconURL ||
+              null,
             featured,
             ipaRef,
             ipa.originalname,
@@ -699,7 +878,8 @@ app.post(
 
       return res.status(201).json({
         ok: true,
-        app: result.rows[0],
+        app:
+          result.rows[0],
       });
     } catch (error) {
       console.error(
@@ -709,12 +889,18 @@ app.post(
 
       if (ipa?.path) {
         await fs.promises
-          .unlink(ipa.path)
-          .catch(() => {});
+          .unlink(
+            ipa.path
+          )
+          .catch(
+            () => {}
+          );
       }
 
       return res.status(500).json({
-        error: "app_creation_failed",
+        error:
+          "app_creation_failed",
+
         message:
           error instanceof Error
             ? error.message
@@ -730,7 +916,10 @@ app.post(
 
 app.get(
   "/api/apps/:id/ipa",
-  async (req, res) => {
+  async (
+    req,
+    res
+  ) => {
     try {
       const result =
         await db.query(
@@ -740,10 +929,13 @@ app.get(
             name,
             ipa_ref,
             ipa_original_name
+
           FROM apps
+
           WHERE id = $1
             AND active = true
             AND ipa_ref IS NOT NULL
+
           LIMIT 1
           `,
           [req.params.id]
@@ -751,7 +943,8 @@ app.get(
 
       if (!result.rowCount) {
         return res.status(404).json({
-          error: "ipa_not_found",
+          error:
+            "ipa_not_found",
         });
       }
 
@@ -820,15 +1013,21 @@ app.delete(
   "/api/admin/apps/:id",
   auth,
   admin,
-  async (req: Req, res) => {
+  async (
+    req,
+    res
+  ) => {
     try {
       const result =
         await db.query(
           `
           SELECT
             ipa_ref
+
           FROM apps
+
           WHERE id = $1
+
           LIMIT 1
           `,
           [req.params.id]
@@ -836,12 +1035,14 @@ app.delete(
 
       if (!result.rowCount) {
         return res.status(404).json({
-          error: "app_not_found",
+          error:
+            "app_not_found",
         });
       }
 
       const ipaRef =
-        result.rows[0].ipa_ref;
+        result.rows[0]
+          .ipa_ref;
 
       await db.query(
         `
@@ -856,12 +1057,18 @@ app.delete(
           path.join(
             root,
             "apps",
-            path.basename(ipaRef)
+            path.basename(
+              ipaRef
+            )
           );
 
         await fs.promises
-          .unlink(ipaPath)
-          .catch(() => {});
+          .unlink(
+            ipaPath
+          )
+          .catch(
+            () => {}
+          );
       }
 
       return res.json({
@@ -888,7 +1095,10 @@ app.delete(
 app.post(
   "/api/install",
   auth,
-  async (req: Req, res) => {
+  async (
+    req: Req,
+    res
+  ) => {
     try {
       const appID =
         req.body?.appID ||
@@ -897,17 +1107,22 @@ app.post(
 
       if (!appID) {
         return res.status(400).json({
-          error: "app_id_required",
+          error:
+            "app_id_required",
         });
       }
 
       const certificate =
         await db.query(
           `
-          SELECT id
+          SELECT
+            id
+
           FROM certificates
+
           WHERE user_id = $1
             AND status = 'active'
+
           LIMIT 1
           `,
           [req.user.id]
@@ -926,9 +1141,12 @@ app.post(
           SELECT
             id,
             ipa_ref
+
           FROM apps
+
           WHERE id = $1
             AND active = true
+
           LIMIT 1
           `,
           [appID]
@@ -936,13 +1154,18 @@ app.post(
 
       if (!appResult.rowCount) {
         return res.status(404).json({
-          error: "app_not_found",
+          error:
+            "app_not_found",
         });
       }
 
-      if (!appResult.rows[0].ipa_ref) {
+      if (
+        !appResult.rows[0]
+          .ipa_ref
+      ) {
         return res.status(409).json({
-          error: "app_has_no_ipa",
+          error:
+            "app_has_no_ipa",
         });
       }
 
@@ -957,6 +1180,7 @@ app.post(
               status,
               message
             )
+
           VALUES
             (
               $1,
@@ -965,6 +1189,7 @@ app.post(
               'queued',
               'في انتظار المعالجة'
             )
+
           RETURNING
             id,
             status,
@@ -974,7 +1199,9 @@ app.post(
           [
             req.user.id,
             appID,
-            certificate.rows[0].id,
+            certificate
+              .rows[0]
+              .id,
           ]
         );
 
@@ -988,7 +1215,8 @@ app.post(
       );
 
       return res.status(500).json({
-        error: "install_failed",
+        error:
+          "install_failed",
       });
     }
   }
@@ -1001,7 +1229,10 @@ app.post(
 app.get(
   "/api/install/:id",
   auth,
-  async (req: Req, res) => {
+  async (
+    req: Req,
+    res
+  ) => {
     try {
       const result =
         await db.query(
@@ -1013,9 +1244,12 @@ app.get(
             j.install_url AS "installURL",
             a.name AS "appName",
             a.version
+
           FROM install_jobs j
+
           JOIN apps a
             ON a.id = j.app_id
+
           WHERE j.id = $1
             AND j.user_id = $2
           `,
@@ -1027,7 +1261,8 @@ app.get(
 
       if (!result.rowCount) {
         return res.status(404).json({
-          error: "job_not_found",
+          error:
+            "job_not_found",
         });
       }
 
@@ -1056,30 +1291,34 @@ app.get(
   "/api/admin/stats",
   auth,
   admin,
-  async (_req, res) => {
+  async (
+    _req,
+    res
+  ) => {
     try {
       const [
         users,
         apps,
         downloads,
         installJobs,
-      ] = await Promise.all([
-        db.query(
-          "SELECT count(*)::int AS n FROM users"
-        ),
+      ] =
+        await Promise.all([
+          db.query(
+            "SELECT count(*)::int AS n FROM users"
+          ),
 
-        db.query(
-          "SELECT count(*)::int AS n FROM apps"
-        ),
+          db.query(
+            "SELECT count(*)::int AS n FROM apps"
+          ),
 
-        db.query(
-          "SELECT count(*)::int AS n FROM downloads"
-        ),
+          db.query(
+            "SELECT count(*)::int AS n FROM downloads"
+          ),
 
-        db.query(
-          "SELECT count(*)::int AS n FROM install_jobs"
-        ),
-      ]);
+          db.query(
+            "SELECT count(*)::int AS n FROM install_jobs"
+          ),
+        ]);
 
       return res.json({
         users:
@@ -1101,7 +1340,8 @@ app.get(
       );
 
       return res.status(500).json({
-        error: "stats_failed",
+        error:
+          "stats_failed",
       });
     }
   }
@@ -1127,6 +1367,7 @@ app.post(
   "/api/admin/certificates/upload",
   auth,
   admin,
+
   certificateUpload.fields([
     {
       name: "p12",
@@ -1137,7 +1378,11 @@ app.post(
       maxCount: 1,
     },
   ]),
-  async (req: Req, res) => {
+
+  async (
+    req: Req,
+    res
+  ) => {
     try {
       const files =
         req.files as {
@@ -1153,7 +1398,8 @@ app.post(
 
       const userID =
         String(
-          req.body?.userID || ""
+          req.body?.userID ||
+            ""
         ).trim();
 
       if (
@@ -1162,14 +1408,17 @@ app.post(
         !mobileprovision
       ) {
         return res.status(400).json({
-          error: "missing_fields",
+          error:
+            "missing_fields",
         });
       }
 
       await db.query(
         `
         UPDATE certificates
+
         SET status = 'revoked'
+
         WHERE user_id = $1
           AND status = 'active'
         `,
@@ -1210,6 +1459,7 @@ app.post(
               certificate_ref,
               profile_ref
             )
+
           VALUES
             (
               $1,
@@ -1217,6 +1467,7 @@ app.post(
               $3,
               $4
             )
+
           RETURNING
             id,
             status
@@ -1259,7 +1510,10 @@ app.get(
   "/api/admin/users",
   auth,
   admin,
-  async (_req, res) => {
+  async (
+    _req,
+    res
+  ) => {
     try {
       const result =
         await db.query(`
@@ -1269,14 +1523,23 @@ app.get(
             u.name,
             u.role,
             u.active,
+
             EXISTS (
               SELECT 1
+
               FROM certificates c
-              WHERE c.user_id = u.id
-                AND c.status = 'active'
+
+              WHERE c.user_id =
+                u.id
+
+                AND c.status =
+                  'active'
             ) AS "hasCertificate"
+
           FROM users u
-          ORDER BY created_at DESC
+
+          ORDER BY
+            created_at DESC
         `);
 
       return res.json(
@@ -1289,7 +1552,8 @@ app.get(
       );
 
       return res.status(500).json({
-        error: "users_failed",
+        error:
+          "users_failed",
       });
     }
   }
@@ -1301,9 +1565,13 @@ app.get(
 
 app.use(
   "/api",
-  (_req, res) => {
+  (
+    _req,
+    res
+  ) => {
     return res.status(404).json({
-      error: "api_route_not_found",
+      error:
+        "api_route_not_found",
     });
   }
 );
@@ -1325,7 +1593,8 @@ app.use(
     );
 
     if (
-      error instanceof multer.MulterError
+      error instanceof
+      multer.MulterError
     ) {
       if (
         error.code ===
@@ -1334,6 +1603,7 @@ app.use(
         return res.status(413).json({
           error:
             "ipa_file_too_large",
+
           message:
             "حجم الملف أكبر من الحد المسموح به وهو 1GB.",
         });
@@ -1342,6 +1612,7 @@ app.use(
       return res.status(400).json({
         error:
           "file_upload_error",
+
         message:
           error.message,
       });
@@ -1354,6 +1625,7 @@ app.use(
       return res.status(400).json({
         error:
           "invalid_ipa_file",
+
         message:
           "يجب اختيار ملف بصيغة IPA.",
       });
@@ -1362,9 +1634,10 @@ app.use(
     return res.status(500).json({
       error:
         "internal_server_error",
+
       message:
         error?.message ||
-        "Unknown server error",
+        "Unknown error",
     });
   }
 );
@@ -1374,7 +1647,8 @@ app.use(
 ========================= */
 
 const PORT = Number(
-  process.env.PORT || 10000
+  process.env.PORT ||
+    10000
 );
 
 async function startServer() {
@@ -1387,21 +1661,29 @@ async function startServer() {
     "0.0.0.0",
     () => {
       console.log(
-        `Store Plus API v10 ready on port ${PORT}`
+        `Store Plus API v11 ready on port ${PORT}`
       );
 
       console.log(
         `Storage root: ${root}`
       );
+
+      console.log(
+        `Admin panel: /admin/admin.html`
+      );
     }
   );
 }
 
-startServer().catch((error) => {
-  console.error(
-    "Server startup error:",
-    error
-  );
+startServer().catch(
+  (error) => {
+    console.error(
+      "Server startup error:",
+      error
+    );
 
-  process.exit(1);
-});
+    process.exit(1);
+  }
+);
+
+
