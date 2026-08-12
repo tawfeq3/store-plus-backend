@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
-
 <head>
   <meta charset="UTF-8">
 
@@ -55,7 +54,6 @@
       >
 
       <button
-        id="loginButton"
         type="button"
         onclick="login()"
       >
@@ -109,49 +107,68 @@
     <main>
 
       <!-- =========================
-           Statistics
+           Stats
       ========================== -->
 
       <section class="stats">
 
         <div class="stat">
+
           <span>
             المستخدمون
           </span>
 
-          <strong id="usersCount">
+          <strong
+            id="usersCount"
+          >
             0
           </strong>
+
         </div>
 
+
         <div class="stat">
+
           <span>
             التطبيقات
           </span>
 
-          <strong id="appsCount">
+          <strong
+            id="appsCount"
+          >
             0
           </strong>
+
         </div>
 
+
         <div class="stat">
+
           <span>
             التنزيلات
           </span>
 
-          <strong id="downloadsCount">
+          <strong
+            id="downloadsCount"
+          >
             0
           </strong>
+
         </div>
 
+
         <div class="stat">
+
           <span>
             طلبات التثبيت
           </span>
 
-          <strong id="jobsCount">
+          <strong
+            id="jobsCount"
+          >
             0
           </strong>
+
         </div>
 
       </section>
@@ -172,38 +189,31 @@
         </div>
 
 
-        <form id="addAppForm">
+        <form
+          id="addAppForm"
+        >
 
           <div class="form-grid">
-
-            <!-- App Name -->
 
             <input
               id="appName"
               name="name"
-              type="text"
               placeholder="اسم التطبيق"
               required
             >
 
 
-            <!-- Version -->
-
             <input
               id="appVersion"
               name="version"
-              type="text"
-              placeholder="الإصدار - مثال: 6.0.2"
+              placeholder="الإصدار"
               required
             >
 
 
-            <!-- Category -->
-
             <input
               id="appCategory"
               name="category"
-              type="text"
               placeholder="التصنيف"
               required
             >
@@ -212,16 +222,13 @@
             <!-- Bundle ID -->
 
             <input
-              id="appBundleID"
-              name="bundleID"
-              type="text"
-              placeholder="Bundle ID - مثال: com.example.app"
+              id="appBundleId"
+              name="bundle_id"
+              placeholder="Bundle ID مثال: com.example.app"
               autocomplete="off"
               required
             >
 
-
-            <!-- Icon -->
 
             <input
               id="appIcon"
@@ -231,26 +238,19 @@
             >
 
 
-            <!-- Description -->
-
             <input
               id="appDescription"
               name="description"
               class="wide"
-              type="text"
               placeholder="وصف التطبيق"
               required
             >
 
 
-            <!-- IPA Label -->
-
             <label>
               ملف التطبيق IPA
             </label>
 
-
-            <!-- IPA -->
 
             <input
               id="appIPA"
@@ -260,8 +260,6 @@
               required
             >
 
-
-            <!-- Featured -->
 
             <label class="checkbox">
 
@@ -317,7 +315,9 @@
         </div>
 
 
-        <div id="appsList">
+        <div
+          id="appsList"
+        >
           جاري التحميل...
         </div>
 
@@ -346,7 +346,9 @@
         </div>
 
 
-        <div id="usersList">
+        <div
+          id="usersList"
+        >
           جاري التحميل...
         </div>
 
@@ -357,16 +359,9 @@
   </div>
 
 
-  <!-- =========================
-       JavaScript
-  ========================== -->
-
   <script
     src="/admin/admin.js"
   ></script>
 
 </body>
-
 </html>
-
-
