@@ -1,10 +1,16 @@
-let token = localStorage.getItem("store_plus_admin_token");
+let token =
+  localStorage.getItem("store_plus_token");
 
-const $ = (id) => document.getElementById(id);
+const API = "";
 
 function showDashboard() {
-  $("loginPage").classList.add("hidden");
-  $("dashboard").classList.remove("hidden");
+  document
+    .getElementById("loginPage")
+    .classList.add("hidden");
+
+  document
+    .getElementById("dashboard")
+    .classList.remove("hidden");
 
   loadStats();
   loadApps();
@@ -12,229 +18,405 @@ function showDashboard() {
 }
 
 function showLogin() {
-  $("loginPage").classList.remove("hidden");
-  $("dashboard").classList.add("hidden");
+  document
+    .getElementById("loginPage")
+    .classList.remove("hidden");
+
+  document
+    .getElementById("dashboard")
+    .classList.add("hidden");
 }
 
 async function login() {
-  const username = $("username").value.trim();
-  const password = $("password").value;
+  const username =
+    document
+      .getElementById("username")
+      .value
+      .trim();
 
-  $("loginError").textContent = "";
+  const password =
+    document
+      .getElementById("password")
+      .value;
+
+  const error =
+    document.getElementById(
+      "loginError"
+    );
+
+  error.textContent = "";
 
   try {
-    const response = await fetch("/api/login", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        username,
-        password
-      })
-    });
+    const response =
+      await fetch(
+        `${API}/api/login`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            username,
+            password,
+          }),
+        }
+      );
 
-    const data = await response.json();
+    const data =
+      await response.json();
 
     if (!response.ok) {
-      throw new Error(data.error || "فشل تسجيل الدخول");
-    }
-
-    if (data.user?.role !== "admin") {
-      throw new Error("هذا الحساب ليس مديرًا");
+      throw new Error(
+        data.error ||
+          "فشل تسجيل الدخول"
+      );
     }
 
     token = data.token;
 
     localStorage.setItem(
-      "store_plus_admin_token",
+      "store_plus_token",
       token
     );
 
     showDashboard();
 
   } catch (error) {
-    $("loginError").textContent = error.message;
+    error.textContent =
+      error.message ||
+      "حدث خطأ أثناء تسجيل الدخول";
   }
 }
 
 function logout() {
-  localStorage.removeItem(
-    "store_plus_admin_token"
-  );
-
   token = null;
+
+  localStorage.removeItem(
+    "store_plus_token"
+  );
 
   showLogin();
 }
 
-async function api(url, options = {}) {
-  options.headers = {
+async function api(
+  url,
+  options = {}
+) {
+  const headers = {
     ...(options.headers || {}),
-    Authorization: `Bearer ${token}`
+    Authorization:
+      `Bearer ${token}`,
   };
 
-  const response = await fetch(url, options);
+  const response =
+    await fetch(
+      `${API}${url}`,
+      {
+        ...options,
+        headers,
+      }
+    );
 
-  if (response.status === 401) {
+  if (
+    response.status === 401 ||
+    response.status === 403
+  ) {
     logout();
-    throw new Error("انتهت جلسة الدخول");
-  }
-
-  const data = await response.json();
-
-  if (!response.ok) {
     throw new Error(
-      data.error || "حدث خطأ في الطلب"
+      "انتهت جلسة الدخول"
     );
   }
 
-  return data;
+  return response;
 }
+
+/* =========================
+   Stats
+========================= */
 
 async function loadStats() {
   try {
-    const data = await api("/api/admin/stats");
+    const response =
+      await api(
+        "/api/admin/stats"
+      );
 
-    $("usersCount").textContent = data.users;
-    $("appsCount").textContent = data.apps;
-    $("downloadsCount").textContent = data.downloads;
-    $("jobsCount").textContent = data.installJobs;
+    const data =
+      await response.json();
+
+    document.getElementById(
+      "usersCount"
+    ).textContent =
+      data.users ?? 0;
+
+    document.getElementById(
+      "appsCount"
+    ).textContent =
+      data.apps ?? 0;
+
+    document.getElementById(
+      "downloadsCount"
+    ).textContent =
+      data.downloads ?? 0;
+
+    document.getElementById(
+      "jobsCount"
+    ).textContent =
+      data.installJobs ?? 0;
 
   } catch (error) {
     console.error(error);
   }
 }
 
+/* =========================
+   Add App
+========================= */
+
+document
+  .getElementById("addAppForm")
+  ?.addEventListener(
+    "submit",
+    async (event) => {
+      event.preventDefault();
+
+      const message =
+        document.getElementById(
+          "appMessage"
+        );
+
+      const ipa =
+        document.getElementById(
+          "appIPA"
+        ).files[0];
+
+      if (!ipa) {
+        message.textContent =
+          "اختر ملف IPA أولاً.";
+
+        return;
+      }
+
+      if (
+        !ipa.name
+          .toLowerCase()
+          .endsWith(".ipa")
+      ) {
+        message.textContent =
+          "الملف يجب أن يكون بصيغة IPA.";
+
+        return;
+      }
+
+      const form =
+        document.getElementById(
+          "addAppForm"
+        );
+
+      const data =
+        new FormData(form);
+
+      data.set(
+        "featured",
+        document.getElementById(
+          "appFeatured"
+        ).checked
+          ? "true"
+          : "false"
+      );
+
+      message.textContent =
+        "جاري رفع التطبيق...";
+
+      try {
+        const response =
+          await api(
+            "/api/admin/apps",
+            {
+              method: "POST",
+              body: data,
+            }
+          );
+
+        const result =
+          await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            result.error ||
+              "فشل إضافة التطبيق"
+          );
+        }
+
+        message.textContent =
+          "تم رفع التطبيق وإضافته بنجاح.";
+
+        form.reset();
+
+        await loadStats();
+        await loadApps();
+
+      } catch (error) {
+        console.error(error);
+
+        message.textContent =
+          error.message ||
+          "حدث خطأ أثناء رفع التطبيق";
+      }
+    }
+  );
+
+/* =========================
+   Apps
+========================= */
+
 async function loadApps() {
-  const container = $("appsList");
+  const list =
+    document.getElementById(
+      "appsList"
+    );
+
+  list.textContent =
+    "جاري التحميل...";
 
   try {
-    const apps = await fetch("/api/apps")
-      .then(r => r.json());
+    const response =
+      await api(
+        "/api/apps"
+      );
+
+    const apps =
+      await response.json();
 
     if (!apps.length) {
-      container.innerHTML =
-        "<p>لا توجد تطبيقات حاليًا.</p>";
+      list.textContent =
+        "لا توجد تطبيقات.";
       return;
     }
 
-    container.innerHTML = apps.map(app => `
-      <div class="app">
-        <strong>${escapeHtml(app.name)}</strong>
+    list.innerHTML =
+      apps
+        .map(
+          (app) => `
+            <div class="app-item">
 
-        <div class="meta">
-          الإصدار: ${escapeHtml(app.version || "-")}
-        </div>
+              <strong>
+                ${escapeHTML(app.name)}
+              </strong>
 
-        <div class="meta">
-          التصنيف: ${escapeHtml(app.category || "-")}
-        </div>
+              <span>
+                الإصدار:
+                ${escapeHTML(app.version)}
+              </span>
 
-        <div class="meta">
-          ${escapeHtml(app.description || "")}
-        </div>
-      </div>
-    `).join("");
+              <span>
+                التصنيف:
+                ${escapeHTML(app.category)}
+              </span>
+
+              <span>
+                IPA:
+                ${
+                  app.hasIPA
+                    ? "متوفر"
+                    : "غير موجود"
+                }
+              </span>
+
+              ${
+                app.hasIPA
+                  ? `
+                    <a
+                      href="/api/apps/${app.id}/ipa"
+                      target="_blank"
+                    >
+                      تحميل IPA
+                    </a>
+                  `
+                  : ""
+              }
+
+            </div>
+          `
+        )
+        .join("");
 
   } catch (error) {
-    container.textContent =
-      "تعذر تحميل التطبيقات";
+    console.error(error);
+
+    list.textContent =
+      "تعذر تحميل التطبيقات.";
   }
 }
+
+/* =========================
+   Users
+========================= */
 
 async function loadUsers() {
-  const container = $("usersList");
+  const list =
+    document.getElementById(
+      "usersList"
+    );
+
+  list.textContent =
+    "جاري التحميل...";
 
   try {
-    const users = await api("/api/admin/users");
+    const response =
+      await api(
+        "/api/admin/users"
+      );
+
+    const users =
+      await response.json();
 
     if (!users.length) {
-      container.innerHTML =
-        "<p>لا يوجد مستخدمون.</p>";
+      list.textContent =
+        "لا يوجد مستخدمون.";
       return;
     }
 
-    container.innerHTML = users.map(user => `
-      <div class="user">
-        <strong>${escapeHtml(user.name || user.username)}</strong>
+    list.innerHTML =
+      users
+        .map(
+          (user) => `
+            <div class="user-item">
+              <strong>
+                ${escapeHTML(user.name || user.username)}
+              </strong>
 
-        <div class="meta">
-          اسم المستخدم: ${escapeHtml(user.username)}
-        </div>
+              <span>
+                ${escapeHTML(user.username)}
+              </span>
 
-        <div class="meta">
-          الصلاحية: ${escapeHtml(user.role)}
-        </div>
-
-        <div class="meta">
-          الشهادة:
-          ${user.hasCertificate ? "موجودة" : "غير موجودة"}
-        </div>
-      </div>
-    `).join("");
+              <span>
+                الشهادة:
+                ${
+                  user.hasCertificate
+                    ? "مرتبطة"
+                    : "غير مرتبطة"
+                }
+              </span>
+            </div>
+          `
+        )
+        .join("");
 
   } catch (error) {
-    container.textContent =
-      "تعذر تحميل المستخدمين";
+    console.error(error);
+
+    list.textContent =
+      "تعذر تحميل المستخدمين.";
   }
 }
 
-async function addApp() {
-  $("appMessage").textContent = "";
+/* =========================
+   Security
+========================= */
 
-  const name = $("appName").value.trim();
-  const version = $("appVersion").value.trim();
-  const category = $("appCategory").value.trim();
-  const iconURL = $("appIcon").value.trim();
-  const description = $("appDescription").value.trim();
-  const featured = $("appFeatured").checked;
-
-  if (!name || !version) {
-    $("appMessage").className = "error";
-    $("appMessage").textContent =
-      "اسم التطبيق والإصدار مطلوبان";
-    return;
-  }
-
-  try {
-    await api("/api/admin/apps", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        name,
-        version,
-        category,
-        iconURL,
-        description,
-        featured
-      })
-    });
-
-    $("appMessage").className = "success";
-    $("appMessage").textContent =
-      "تمت إضافة التطبيق بنجاح";
-
-    $("appName").value = "";
-    $("appVersion").value = "";
-    $("appCategory").value = "";
-    $("appIcon").value = "";
-    $("appDescription").value = "";
-    $("appFeatured").checked = false;
-
-    await loadApps();
-    await loadStats();
-
-  } catch (error) {
-    $("appMessage").className = "error";
-    $("appMessage").textContent =
-      error.message;
-  }
-}
-
-function escapeHtml(value) {
+function escapeHTML(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -243,8 +425,14 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+/* =========================
+   Startup
+========================= */
+
 if (token) {
   showDashboard();
 } else {
   showLogin();
 }
+
+
