@@ -29,12 +29,21 @@ app.use(
 
 app.use(express.json());
 
+/*
+ * Render Free لا يدعم Persistent Disk.
+ * لذلك نستخدم /tmp بدل /var/data.
+ *
+ * ملاحظة:
+ * الملفات الموجودة في /tmp قد تختفي عند إعادة تشغيل الخدمة.
+ */
 const root = path.resolve(
-  process.env.STORAGE_ROOT || "/var/data/store-plus"
+  process.env.STORAGE_ROOT || "/tmp/store-plus"
 );
 
 for (const d of ["certificates", "jobs"]) {
-  fs.mkdirSync(path.join(root, d), { recursive: true });
+  fs.mkdirSync(path.join(root, d), {
+    recursive: true,
+  });
 }
 
 type Req = express.Request & {
@@ -47,12 +56,14 @@ const auth = (
   next: express.NextFunction
 ) => {
   try {
-    const t = (req.header("authorization") || "").replace(
-      /^Bearer /,
-      ""
-    );
+    const t = (
+      req.header("authorization") || ""
+    ).replace(/^Bearer /, "");
 
-    req.user = jwt.verify(t, process.env.JWT_SECRET!);
+    req.user = jwt.verify(
+      t,
+      process.env.JWT_SECRET!
+    );
 
     next();
   } catch {
@@ -73,6 +84,8 @@ const admin = (
         error: "admin_required",
       });
 
+/* Health */
+
 app.get("/api/health", async (_q, r) => {
   try {
     await db.query("select 1");
@@ -88,8 +101,13 @@ app.get("/api/health", async (_q, r) => {
   }
 });
 
+/* Login */
+
 app.post("/api/login", async (q, r) => {
-  const { username, password } = q.body || {};
+  const {
+    username,
+    password,
+  } = q.body || {};
 
   const x = await db.query(
     "select id,username,password_hash,name,role from users where username=$1 and active=true",
@@ -130,6 +148,8 @@ app.post("/api/login", async (q, r) => {
   });
 });
 
+/* Apps */
+
 app.get("/api/apps", async (_q, r) => {
   r.json(
     (
@@ -139,6 +159,8 @@ app.get("/api/apps", async (_q, r) => {
     ).rows
   );
 });
+
+/* Install */
 
 app.post(
   "/api/install",
@@ -166,206 +188,4 @@ app.post(
       });
     }
 
-    r.status(202).json(
-      (
-        await db.query(
-          `insert into install_jobs
-          (user_id,app_id,certificate_id,status,message)
-          values($1,$2,$3,'queued','في انتظار المعالجة')
-          returning id,status,message,created_at as "createdAt"`,
-          [
-            q.user.id,
-            q.body.appID,
-            c.rows[0].id,
-          ]
-        )
-      ).rows[0]
-    );
-  }
-);
-
-app.get(
-  "/api/install/:id",
-  auth,
-  async (q: Req, r) => {
-    const x = await db.query(
-      `select
-        j.id,
-        j.status,
-        j.message,
-        j.install_url as "installURL",
-        a.name as "appName",
-        a.version
-      from install_jobs j
-      join apps a on a.id=j.app_id
-      where j.id=$1 and j.user_id=$2`,
-      [
-        q.params.id,
-        q.user.id,
-      ]
-    );
-
-    if (x.rowCount) {
-      r.json(x.rows[0]);
-    } else {
-      r.status(404).json({
-        error: "job_not_found",
-      });
-    }
-  }
-);
-
-app.get(
-  "/api/admin/stats",
-  auth,
-  admin,
-  async (_q, r) => {
-    const [u, a, d, j] = await Promise.all(
-      ["users", "apps", "downloads", "install_jobs"].map(
-        (t) =>
-          db.query(
-            `select count(*)::int n from ${t}`
-          )
-      )
-    );
-
-    r.json({
-      users: u.rows[0].n,
-      apps: a.rows[0].n,
-      downloads: d.rows[0].n,
-      installJobs: j.rows[0].n,
-    });
-  }
-);
-
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    files: 2,
-    fileSize: 10 * 1024 * 1024,
-  },
-});
-
-app.post(
-  "/api/admin/certificates/upload",
-  auth,
-  admin,
-  upload.fields([
-    {
-      name: "p12",
-      maxCount: 1,
-    },
-    {
-      name: "mobileprovision",
-      maxCount: 1,
-    },
-  ]),
-  async (q: Req, r) => {
-    try {
-      const f = q.files as any;
-
-      const p = f?.p12?.[0];
-      const m = f?.mobileprovision?.[0];
-
-      const uid = String(q.body.userID || "");
-
-      if (!uid || !p || !m) {
-        return r.status(400).json({
-          error: "missing_fields",
-        });
-      }
-
-      await db.query(
-        "update certificates set status='revoked' where user_id=$1 and status='active'",
-        [uid]
-      );
-
-      const ref = crypto.randomUUID();
-      const prof = crypto.randomUUID();
-
-      await fs.promises.writeFile(
-        path.join(
-          root,
-          "certificates",
-          ref + ".p12"
-        ),
-        p.buffer,
-        {
-          mode: 0o600,
-        }
-      );
-
-      await fs.promises.writeFile(
-        path.join(
-          root,
-          "certificates",
-          prof + ".mobileprovision"
-        ),
-        m.buffer,
-        {
-          mode: 0o600,
-        }
-      );
-
-      const certificate = (
-        await db.query(
-          `insert into certificates
-          (user_id,label,certificate_ref,profile_ref)
-          values($1,$2,$3,$4)
-          returning id,status`,
-          [
-            uid,
-            q.body.label || "Certificate",
-            ref,
-            prof,
-          ]
-        )
-      ).rows[0];
-
-      return r.status(201).json(certificate);
-    } catch (error) {
-      console.error(error);
-
-      return r.status(500).json({
-        error: "certificate_upload_failed",
-      });
-    }
-  }
-);
-
-app.get(
-  "/api/admin/users",
-  auth,
-  admin,
-  async (_q, r) => {
-    r.json(
-      (
-        await db.query(
-          `select
-            u.id,
-            u.username,
-            u.name,
-            u.role,
-            u.active,
-            exists(
-              select 1
-              from certificates c
-              where c.user_id=u.id
-              and c.status='active'
-            ) as "hasCertificate"
-          from users u
-          order by created_at desc`
-        )
-      ).rows
-    );
-  }
-);
-
-app.listen(
-  Number(process.env.PORT || 10000),
-  "0.0.0.0",
-  () =>
-    console.log(
-      "Store Plus API v9 ready"
-    )
-);
+    r.status(
