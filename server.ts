@@ -39,6 +39,27 @@ app.use(
 app.use(express.json());
 
 /* =========================
+   Admin Dashboard
+========================= */
+
+const adminPath = path.join(
+  process.cwd(),
+  "src",
+  "admin"
+);
+
+app.use(
+  "/admin",
+  express.static(adminPath)
+);
+
+app.get("/admin", (_req, res) => {
+  res.sendFile(
+    path.join(adminPath, "admin.html")
+  );
+});
+
+/* =========================
    Storage
 ========================= */
 
