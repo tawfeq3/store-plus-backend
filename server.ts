@@ -1,4 +1,5 @@
 import "dotenv/config";
+
 import express from "express";
 import cors from "cors";
 import jwt from "jsonwebtoken";
@@ -11,6 +12,10 @@ import crypto from "node:crypto";
 
 const { Pool } = pg;
 
+/* =========================
+   Database
+========================= */
+
 const db = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl:
@@ -18,6 +23,10 @@ const db = new Pool({
       ? { rejectUnauthorized: false }
       : undefined,
 });
+
+/* =========================
+   App
+========================= */
 
 const app = express();
 
@@ -29,26 +38,31 @@ app.use(
 
 app.use(express.json());
 
-/*
- * Render Free لا يدعم Persistent Disk.
- * لذلك نستخدم /tmp بدل /var/data.
- *
- * ملاحظة:
- * الملفات الموجودة في /tmp قد تختفي عند إعادة تشغيل الخدمة.
- */
+/* =========================
+   Storage
+========================= */
+
 const root = path.resolve(
   process.env.STORAGE_ROOT || "/tmp/store-plus"
 );
 
-for (const d of ["certificates", "jobs"]) {
-  fs.mkdirSync(path.join(root, d), {
+for (const directory of ["certificates", "jobs"]) {
+  fs.mkdirSync(path.join(root, directory), {
     recursive: true,
   });
 }
 
+/* =========================
+   Types
+========================= */
+
 type Req = express.Request & {
   user?: any;
 };
+
+/* =========================
+   Authentication
+========================= */
 
 const auth = (
   req: Req,
@@ -56,230 +70,351 @@ const auth = (
   next: express.NextFunction
 ) => {
   try {
-    const t = (
-      req.header("authorization") || ""
-    ).replace(/^Bearer /, "");
+    const token = (req.header("authorization") || "").replace(
+      /^Bearer /,
+      ""
+    );
+
+    if (!token) {
+      return res.status(401).json({
+        error: "unauthorized",
+      });
+    }
 
     req.user = jwt.verify(
-      t,
+      token,
       process.env.JWT_SECRET!
     );
 
     next();
   } catch {
-    res.status(401).json({
+    return res.status(401).json({
       error: "unauthorized",
     });
   }
 };
 
+/* =========================
+   Admin
+========================= */
+
 const admin = (
   req: Req,
   res: express.Response,
   next: express.NextFunction
-) =>
-  req.user?.role === "admin"
-    ? next()
-    : res.status(403).json({
-        error: "admin_required",
-      });
+) => {
+  if (req.user?.role === "admin") {
+    return next();
+  }
 
-/* Health */
+  return res.status(403).json({
+    error: "admin_required",
+  });
+};
 
-app.get("/api/health", async (_q, r) => {
+/* =========================
+   Health
+========================= */
+
+app.get("/api/health", async (_req, res) => {
   try {
-    await db.query("select 1");
+    await db.query("SELECT 1");
 
-    r.json({
+    return res.json({
       ok: true,
       version: "9.0.0",
     });
   } catch {
-    r.status(503).json({
+    return res.status(503).json({
       ok: false,
     });
   }
 });
 
-/* Login */
+/* =========================
+   Login
+========================= */
 
-app.post("/api/login", async (q, r) => {
-  const {
-    username,
-    password,
-  } = q.body || {};
+app.post("/api/login", async (req, res) => {
+  try {
+    const { username, password } = req.body || {};
 
-  const x = await db.query(
-    "select id,username,password_hash,name,role from users where username=$1 and active=true",
-    [username]
-  );
+    const result = await db.query(
+      `
+      SELECT
+        id,
+        username,
+        password_hash,
+        name,
+        role
+      FROM users
+      WHERE username = $1
+        AND active = true
+      `,
+      [username]
+    );
 
-  if (
-    !x.rowCount ||
-    !(await bcrypt.compare(
-      password || "",
-      x.rows[0].password_hash
-    ))
-  ) {
-    return r.status(401).json({
-      error: "invalid_credentials",
-    });
-  }
+    if (
+      !result.rowCount ||
+      !(await bcrypt.compare(
+        password || "",
+        result.rows[0].password_hash
+      ))
+    ) {
+      return res.status(401).json({
+        error: "invalid_credentials",
+      });
+    }
 
-  const u = x.rows[0];
+    const user = result.rows[0];
 
-  r.json({
-    token: jwt.sign(
+    const token = jwt.sign(
       {
-        id: u.id,
-        role: u.role,
+        id: user.id,
+        role: user.role,
       },
       process.env.JWT_SECRET!,
       {
         expiresIn: "30d",
       }
-    ),
-    user: {
-      id: u.id,
-      username: u.username,
-      name: u.name,
-      role: u.role,
-    },
-  });
+    );
+
+    return res.json({
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        name: user.name,
+        role: user.role,
+      },
+    });
+  } catch (error) {
+    console.error("Login error:", error);
+
+    return res.status(500).json({
+      error: "login_failed",
+    });
+  }
 });
 
-/* Apps */
+/* =========================
+   Apps
+========================= */
 
-app.get("/api/apps", async (_q, r) => {
-  r.json(
-    (
-      await db.query(
-        'select id,name,version,description,category,icon_url as "iconURL",featured,updated from apps where active=true order by featured desc,updated_at desc'
-      )
-    ).rows
-  );
+app.get("/api/apps", async (_req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT
+        id,
+        name,
+        version,
+        description,
+        category,
+        icon_url AS "iconURL",
+        featured,
+        updated
+      FROM apps
+      WHERE active = true
+      ORDER BY featured DESC, updated_at DESC
+    `);
+
+    return res.json(result.rows);
+  } catch (error) {
+    console.error("Apps error:", error);
+
+    return res.status(500).json({
+      error: "apps_failed",
+    });
+  }
 });
 
-/* Install */
+/* =========================
+   Install App
+========================= */
 
 app.post(
   "/api/install",
   auth,
-  async (q: Req, r) => {
-    const c = await db.query(
-      "select id from certificates where user_id=$1 and status='active' limit 1",
-      [q.user.id]
-    );
+  async (req: Req, res) => {
+    try {
+      const certificate = await db.query(
+        `
+        SELECT id
+        FROM certificates
+        WHERE user_id = $1
+          AND status = 'active'
+        LIMIT 1
+        `,
+        [req.user.id]
+      );
 
-    if (!c.rowCount) {
-      return r.status(409).json({
-        error: "certificate_not_linked",
+      if (!certificate.rowCount) {
+        return res.status(409).json({
+          error: "certificate_not_linked",
+        });
+      }
+
+      const appResult = await db.query(
+        `
+        SELECT id
+        FROM apps
+        WHERE id = $1
+          AND active = true
+        `,
+        [req.body?.appID]
+      );
+
+      if (!appResult.rowCount) {
+        return res.status(404).json({
+          error: "app_not_found",
+        });
+      }
+
+      const job = await db.query(
+        `
+        INSERT INTO install_jobs
+          (
+            user_id,
+            app_id,
+            certificate_id,
+            status,
+            message
+          )
+        VALUES
+          (
+            $1,
+            $2,
+            $3,
+            'queued',
+            'في انتظار المعالجة'
+          )
+        RETURNING
+          id,
+          status,
+          message,
+          created_at AS "createdAt"
+        `,
+        [
+          req.user.id,
+          req.body.appID,
+          certificate.rows[0].id,
+        ]
+      );
+
+      return res.status(202).json(job.rows[0]);
+    } catch (error) {
+      console.error("Install error:", error);
+
+      return res.status(500).json({
+        error: "install_failed",
       });
     }
-
-    const a = await db.query(
-      "select id from apps where id=$1 and active=true",
-      [q.body?.appID]
-    );
-
-    if (!a.rowCount) {
-      return r.status(404).json({
-        error: "app_not_found",
-      });
-    }
-
-    r.status(202).json(
-  (
-    await db.query(
-      `
-      insert into install_jobs
-        (user_id, app_id, certificate_id, status, message)
-      values
-        ($1, $2, $3, 'queued', 'في انتظار المعالجة')
-      returning
-        id,
-        status,
-        message,
-        created_at as "createdAt"
-      `,
-      [
-        q.user.id,
-        q.body?.appID,
-        c.rows[0].id
-      ]
-    )
-  ).rows[0]
-);
   }
 );
+
+/* =========================
+   Install Status
+========================= */
 
 app.get(
   "/api/install/:id",
   auth,
-  async (q: Req, r) => {
-    const x = await db.query(
-      `
-      select
-        j.id,
-        j.status,
-        j.message,
-        j.install_url as "installURL",
-        a.name as "appName",
-        a.version
-      from install_jobs j
-      join apps a on a.id = j.app_id
-      where j.id = $1
-        and j.user_id = $2
-      `,
-      [
-        q.params.id,
-        q.user.id
-      ]
-    );
+  async (req: Req, res) => {
+    try {
+      const result = await db.query(
+        `
+        SELECT
+          j.id,
+          j.status,
+          j.message,
+          j.install_url AS "installURL",
+          a.name AS "appName",
+          a.version
+        FROM install_jobs j
+        JOIN apps a
+          ON a.id = j.app_id
+        WHERE j.id = $1
+          AND j.user_id = $2
+        `,
+        [
+          req.params.id,
+          req.user.id,
+        ]
+      );
 
-    if (x.rowCount) {
-      r.json(x.rows[0]);
-    } else {
-      r.status(404).json({
-        error: "job_not_found"
+      if (!result.rowCount) {
+        return res.status(404).json({
+          error: "job_not_found",
+        });
+      }
+
+      return res.json(result.rows[0]);
+    } catch (error) {
+      console.error("Install status error:", error);
+
+      return res.status(500).json({
+        error: "install_status_failed",
       });
     }
   }
 );
 
-/* Admin stats */
+/* =========================
+   Admin Stats
+========================= */
 
 app.get(
   "/api/admin/stats",
   auth,
   admin,
-  async (_q, r) => {
-    const [u, a, d, j] = await Promise.all(
-      ["users", "apps", "downloads", "install_jobs"].map(
-        (t) =>
-          db.query(
-            `select count(*)::int n from ${t}`
-          )
-      )
-    );
+  async (_req, res) => {
+    try {
+      const [
+        users,
+        apps,
+        downloads,
+        installJobs,
+      ] = await Promise.all([
+        db.query(
+          "SELECT count(*)::int AS n FROM users"
+        ),
+        db.query(
+          "SELECT count(*)::int AS n FROM apps"
+        ),
+        db.query(
+          "SELECT count(*)::int AS n FROM downloads"
+        ),
+        db.query(
+          "SELECT count(*)::int AS n FROM install_jobs"
+        ),
+      ]);
 
-    r.json({
-      users: u.rows[0].n,
-      apps: a.rows[0].n,
-      downloads: d.rows[0].n,
-      installJobs: j.rows[0].n
-    });
+      return res.json({
+        users: users.rows[0].n,
+        apps: apps.rows[0].n,
+        downloads: downloads.rows[0].n,
+        installJobs: installJobs.rows[0].n,
+      });
+    } catch (error) {
+      console.error("Admin stats error:", error);
+
+      return res.status(500).json({
+        error: "stats_failed",
+      });
+    }
   }
 );
 
-/* Certificate upload */
+/* =========================
+   Certificate Upload
+========================= */
 
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
     files: 2,
-    fileSize: 10 * 1024 * 1024
-  }
+    fileSize: 10 * 1024 * 1024,
+  },
 });
 
 app.post(
@@ -287,116 +422,183 @@ app.post(
   auth,
   admin,
   upload.fields([
-    { name: "p12", maxCount: 1 },
-    { name: "mobileprovision", maxCount: 1 }
+    {
+      name: "p12",
+      maxCount: 1,
+    },
+    {
+      name: "mobileprovision",
+      maxCount: 1,
+    },
   ]),
-  async (q: Req, r) => {
-    const f = q.files as {
-      p12?: Express.Multer.File[];
-      mobileprovision?: Express.Multer.File[];
-    };
+  async (req: Req, res) => {
+    try {
+      const files = req.files as {
+        p12?: Express.Multer.File[];
+        mobileprovision?: Express.Multer.File[];
+      };
 
-    const p = f?.p12?.[0];
-    const m = f?.mobileprovision?.[0];
-    const uid = String(q.body.userID || "");
+      const p12 = files?.p12?.[0];
+      const mobileprovision =
+        files?.mobileprovision?.[0];
 
-    if (!uid || !p || !m) {
-      return r.status(400).json({
-        error: "missing_fields"
+      const userID = String(
+        req.body?.userID || ""
+      );
+
+      if (
+        !userID ||
+        !p12 ||
+        !mobileprovision
+      ) {
+        return res.status(400).json({
+          error: "missing_fields",
+        });
+      }
+
+      /* Revoke old certificate */
+
+      await db.query(
+        `
+        UPDATE certificates
+        SET status = 'revoked'
+        WHERE user_id = $1
+          AND status = 'active'
+        `,
+        [userID]
+      );
+
+      /* Generate unique file references */
+
+      const certificateRef =
+        crypto.randomUUID();
+
+      const profileRef =
+        crypto.randomUUID();
+
+      /* Save .p12 */
+
+      await fs.promises.writeFile(
+        path.join(
+          root,
+          "certificates",
+          certificateRef + ".p12"
+        ),
+        p12.buffer
+      );
+
+      /* Save .mobileprovision */
+
+      await fs.promises.writeFile(
+        path.join(
+          root,
+          "certificates",
+          profileRef + ".mobileprovision"
+        ),
+        mobileprovision.buffer
+      );
+
+      /* Save database record */
+
+      const result = await db.query(
+        `
+        INSERT INTO certificates
+          (
+            user_id,
+            label,
+            certificate_ref,
+            profile_ref
+          )
+        VALUES
+          (
+            $1,
+            $2,
+            $3,
+            $4
+          )
+        RETURNING
+          id,
+          status
+        `,
+        [
+          userID,
+          req.body?.label || "Certificate",
+          certificateRef,
+          profileRef,
+        ]
+      );
+
+      return res.status(201).json(
+        result.rows[0]
+      );
+    } catch (error) {
+      console.error(
+        "Certificate upload error:",
+        error
+      );
+
+      return res.status(500).json({
+        error: "certificate_upload_failed",
       });
     }
-
-    await db.query(
-      `
-      update certificates
-      set status = 'revoked'
-      where user_id = $1
-        and status = 'active'
-      `,
-      [uid]
-    );
-
-    const ref = crypto.randomUUID();
-    const prof = crypto.randomUUID();
-
-    await fs.writeFile(
-      path.join(
-        root,
-        "certificates",
-        ref + ".p12"
-      ),
-      p.buffer,
-      { mode: 0o600 }
-    );
-
-    await fs.promises.writeFile(
-  path.join(root, "certificates", ref + ".p12"),
-  p.buffer,
-  { mode: 0o600 }
-);
-
-await fs.promises.writeFile(
-  path.join(root, "certificates", prof + ".mobileprovision"),
-  m.buffer,
-  { mode: 0o600 }
-);
-
-    const result = await db.query(
-      `
-      insert into certificates
-        (user_id, label, certificate_ref, profile_ref)
-      values
-        ($1, $2, $3, $4)
-      returning id, status
-      `,
-      [
-        uid,
-        q.body.label || "Certificate",
-        ref,
-        prof
-      ]
-    );
-
-    r.status(201).json(result.rows[0]);
   }
 );
 
-/* Admin users */
+/* =========================
+   Admin Users
+========================= */
 
 app.get(
   "/api/admin/users",
   auth,
   admin,
-  async (_q, r) => {
-    const result = await db.query(
-      `
-      select
-        u.id,
-        u.username,
-        u.name,
-        u.role,
-        u.active,
-        exists(
-          select 1
-          from certificates c
-          where c.user_id = u.id
-            and c.status = 'active'
-        ) as "hasCertificate"
-      from users u
-      order by created_at desc
-      `
-    );
+  async (_req, res) => {
+    try {
+      const result = await db.query(`
+        SELECT
+          u.id,
+          u.username,
+          u.name,
+          u.role,
+          u.active,
+          EXISTS (
+            SELECT 1
+            FROM certificates c
+            WHERE c.user_id = u.id
+              AND c.status = 'active'
+          ) AS "hasCertificate"
+        FROM users u
+        ORDER BY created_at DESC
+      `);
 
-    r.json(result.rows);
+      return res.json(result.rows);
+    } catch (error) {
+      console.error(
+        "Admin users error:",
+        error
+      );
+
+      return res.status(500).json({
+        error: "users_failed",
+      });
+    }
   }
 );
 
-/* Start server */
+/* =========================
+   Start Server
+========================= */
+
+const PORT = Number(
+  process.env.PORT || 10000
+);
 
 app.listen(
-  Number(process.env.PORT || 10000),
+  PORT,
   "0.0.0.0",
   () => {
-    console.log("Store Plus API v9 ready");
+    console.log(
+      `Store Plus API v9 ready on port ${PORT}`
+    );
   }
 );
