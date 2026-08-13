@@ -1,3 +1,6 @@
+admin.html
+
+
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -8,9 +11,7 @@
     content="width=device-width, initial-scale=1.0"
   >
 
-  <title>
-    Store Plus - لوحة التحكم
-  </title>
+  <title>Store Plus - لوحة التحكم</title>
 
   <link
     rel="stylesheet"
@@ -28,12 +29,9 @@
     id="loginPage"
     class="page"
   >
-
     <div class="card login-card">
 
-      <h1>
-        Store Plus
-      </h1>
+      <h1>Store Plus</h1>
 
       <p>
         لوحة التحكم
@@ -66,7 +64,6 @@
       ></div>
 
     </div>
-
   </div>
 
 
@@ -82,7 +79,6 @@
     <header>
 
       <div>
-
         <h1>
           Store Plus
         </h1>
@@ -90,7 +86,6 @@
         <span>
           لوحة التحكم
         </span>
-
       </div>
 
       <button
@@ -107,75 +102,59 @@
     <main>
 
       <!-- =========================
-           Stats
+           Statistics
       ========================== -->
 
       <section class="stats">
 
         <div class="stat">
-
           <span>
             المستخدمون
           </span>
 
-          <strong
-            id="usersCount"
-          >
+          <strong id="usersCount">
             0
           </strong>
-
         </div>
 
 
         <div class="stat">
-
           <span>
             التطبيقات
           </span>
 
-          <strong
-            id="appsCount"
-          >
+          <strong id="appsCount">
             0
           </strong>
-
         </div>
 
 
         <div class="stat">
-
           <span>
             التنزيلات
           </span>
 
-          <strong
-            id="downloadsCount"
-          >
+          <strong id="downloadsCount">
             0
           </strong>
-
         </div>
 
 
         <div class="stat">
-
           <span>
             طلبات التثبيت
           </span>
 
-          <strong
-            id="jobsCount"
-          >
+          <strong id="jobsCount">
             0
           </strong>
-
         </div>
 
       </section>
 
 
       <!-- =========================
-           Add App
+           Add Application
       ========================== -->
 
       <section class="card">
@@ -191,6 +170,7 @@
 
         <form
           id="addAppForm"
+          enctype="multipart/form-data"
         >
 
           <div class="form-grid">
@@ -219,13 +199,10 @@
             >
 
 
-            <!-- Bundle ID -->
-
             <input
               id="appBundleId"
               name="bundle_id"
               placeholder="Bundle ID مثال: com.example.app"
-              autocomplete="off"
               required
             >
 
@@ -277,7 +254,6 @@
 
 
           <button
-            id="addAppButton"
             type="submit"
           >
             إضافة التطبيق
@@ -288,6 +264,113 @@
 
         <div
           id="appMessage"
+        ></div>
+
+      </section>
+
+
+      <!-- =========================
+           Certificate Upload
+      ========================== -->
+
+      <section class="card">
+
+        <div class="section-title">
+
+          <h2>
+            إضافة شهادة لمستخدم
+          </h2>
+
+        </div>
+
+
+        <form
+          id="certificateForm"
+          enctype="multipart/form-data"
+        >
+
+          <div class="form-grid">
+
+            <!-- User -->
+
+            <select
+              id="certificateUser"
+              name="userID"
+              required
+            >
+              <option value="">
+                اختر المستخدم
+              </option>
+            </select>
+
+
+            <!-- Label -->
+
+            <input
+              id="certificateLabel"
+              name="label"
+              type="text"
+              placeholder="اسم الشهادة"
+              value="Certificate"
+              required
+            >
+
+
+            <!-- P12 -->
+
+            <label>
+              ملف شهادة P12
+            </label>
+
+            <input
+              id="certificateP12"
+              name="p12"
+              type="file"
+              accept=".p12,.pfx,application/x-pkcs12"
+              required
+            >
+
+
+            <!-- P12 Password -->
+
+            <input
+              id="certificateP12Password"
+              name="p12Password"
+              type="password"
+              placeholder="كلمة مرور شهادة P12"
+              autocomplete="new-password"
+              required
+            >
+
+
+            <!-- Mobile Provision -->
+
+            <label>
+              ملف MobileProvision
+            </label>
+
+            <input
+              id="certificateProvision"
+              name="mobileprovision"
+              type="file"
+              accept=".mobileprovision"
+              required
+            >
+
+          </div>
+
+
+          <button
+            type="submit"
+          >
+            حفظ الشهادة
+          </button>
+
+        </form>
+
+
+        <div
+          id="certificateMessage"
         ></div>
 
       </section>
@@ -365,3 +448,5 @@
 
 </body>
 </html>
+
+
