@@ -22,94 +22,9 @@ const db = new Pool({
 
 const app = express();
 
-/* =========================
-   Certificate Password Encryption
-========================= */
-
-const certificatePasswordKey =
-  process.env.CERTIFICATE_PASSWORD_KEY;
-
-if (!certificatePasswordKey) {
-  throw new Error(
-    "CERTIFICATE_PASSWORD_KEY is required."
-  );
-}
-
-const encryptionKey = crypto
-  .createHash("sha256")
-  .update(certificatePasswordKey)
-  .digest();
-
-function encryptCertificatePassword(
-  password: string
-): string {
-  const iv = crypto.randomBytes(16);
-
-  const cipher = crypto.createCipheriv(
-    "aes-256-gcm",
-    encryptionKey,
-    iv
-  );
-
-  const encrypted = Buffer.concat([
-    cipher.update(password, "utf8"),
-    cipher.final(),
-  ]);
-
-  const authTag = cipher.getAuthTag();
-
-  return [
-    iv.toString("base64"),
-    authTag.toString("base64"),
-    encrypted.toString("base64"),
-  ].join(".");
-}
-
-function decryptCertificatePassword(
-  value: string
-): string {
-  const parts = value.split(".");
-
-  if (parts.length !== 3) {
-    throw new Error(
-      "Invalid encrypted certificate password."
-    );
-  }
-
-  const [
-    ivBase64,
-    authTagBase64,
-    encryptedBase64,
-  ] = parts;
-
-  const decipher =
-    crypto.createDecipheriv(
-      "aes-256-gcm",
-      encryptionKey,
-      Buffer.from(ivBase64, "base64")
-    );
-
-  decipher.setAuthTag(
-    Buffer.from(authTagBase64, "base64")
-  );
-
-  const decrypted =
-    Buffer.concat([
-      decipher.update(
-        Buffer.from(
-          encryptedBase64,
-          "base64"
-        )
-      ),
-      decipher.final(),
-    ]);
-
-  return decrypted.toString("utf8");
-}
-
-/* =========================
+/* =========================================================
    CORS
-========================= */
+========================================================= */
 
 app.use(
   cors({
@@ -141,9 +56,9 @@ app.use(
   })
 );
 
-/* =========================
-   Admin Static Files
-========================= */
+/* =========================================================
+   ADMIN STATIC FILES
+========================================================= */
 
 const adminDir = path.resolve(
   process.cwd(),
@@ -182,9 +97,9 @@ app.get(
   }
 );
 
-/* =========================
-   Storage
-========================= */
+/* =========================================================
+   STORAGE
+========================================================= */
 
 const root = path.resolve(
   process.env.STORAGE_ROOT ||
@@ -197,43 +112,270 @@ for (const directory of [
   "apps",
 ]) {
   fs.mkdirSync(
-    path.join(root, directory),
+    path.join(
+      root,
+      directory
+    ),
     {
       recursive: true,
     }
   );
 }
 
-/* =========================
-   Request Type
-========================= */
+/* =========================================================
+   REQUEST TYPE
+========================================================= */
 
 type Req = express.Request & {
   user?: any;
 };
 
-/* =========================
-   Database Schema
-========================= */
+/* =========================================================
+   P12 PASSWORD ENCRYPTION
+========================================================= */
+
+/*
+ * كلمة مرور P12 يجب أن تكون قابلة للاسترجاع
+ * لأن نظام التوقيع سيحتاجها لاحقًا.
+ *
+ * لذلك لا نستخدم bcrypt هنا.
+ *
+ * نستخدم AES-256-GCM مع مفتاح موجود في .env:
+ *
+ * P12_ENCRYPTION_KEY=...
+ *
+ * لا تشارك هذا المفتاح مع أي شخص.
+ */
+
+const P12_ENCRYPTION_ALGORITHM =
+  "aes-256-gcm";
+
+const P12_ENCRYPTION_KEY_RAW =
+  process.env.P12_ENCRYPTION_KEY || "";
+
+function getP12EncryptionKey(): Buffer {
+  if (!P12_ENCRYPTION_KEY_RAW) {
+    throw new Error(
+      "P12_ENCRYPTION_KEY is not configured."
+    );
+  }
+
+  /*
+   * نقبل مفتاحًا hex بطول 64 حرفًا.
+   */
+  if (
+    /^[0-9a-fA-F]{64}$/.test(
+      P12_ENCRYPTION_KEY_RAW
+    )
+  ) {
+    return Buffer.from(
+      P12_ENCRYPTION_KEY_RAW,
+      "hex"
+    );
+  }
+
+  /*
+   * أو نحول أي نص إلى SHA-256.
+   */
+  return crypto
+    .createHash("sha256")
+    .update(
+      P12_ENCRYPTION_KEY_RAW
+    )
+    .digest();
+}
+
+function encryptP12Password(
+  password: string
+): string {
+  const key =
+    getP12EncryptionKey();
+
+  const iv =
+    crypto.randomBytes(12);
+
+  const cipher =
+    crypto.createCipheriv(
+      P12_ENCRYPTION_ALGORITHM,
+      key,
+      iv
+    );
+
+  const encrypted =
+    Buffer.concat([
+      cipher.update(
+        password,
+        "utf8"
+      ),
+      cipher.final(),
+    ]);
+
+  const authTag =
+    cipher.getAuthTag();
+
+  return [
+    iv.toString("base64"),
+    authTag.toString("base64"),
+    encrypted.toString("base64"),
+  ].join(".");
+}
+
+function decryptP12Password(
+  encryptedValue: string
+): string {
+  const key =
+    getP12EncryptionKey();
+
+  const parts =
+    encryptedValue.split(".");
+
+  if (parts.length !== 3) {
+    throw new Error(
+      "Invalid encrypted P12 password."
+    );
+  }
+
+  const iv =
+    Buffer.from(
+      parts[0],
+      "base64"
+    );
+
+  const authTag =
+    Buffer.from(
+      parts[1],
+      "base64"
+    );
+
+  const encrypted =
+    Buffer.from(
+      parts[2],
+      "base64"
+    );
+
+  const decipher =
+    crypto.createDecipheriv(
+      P12_ENCRYPTION_ALGORITHM,
+      key,
+      iv
+    );
+
+  decipher.setAuthTag(
+    authTag
+  );
+
+  const decrypted =
+    Buffer.concat([
+      decipher.update(
+        encrypted
+      ),
+      decipher.final(),
+    ]);
+
+  return decrypted.toString(
+    "utf8"
+  );
+}
+
+/*
+ * هذه الدالة سنحتاجها لاحقًا في نظام التوقيع
+ * للحصول على كلمة مرور شهادة معينة.
+ */
+async function getCertificateCredentials(
+  certificateID: string
+) {
+  const result =
+    await db.query(
+      `
+      SELECT
+        c.id,
+        c.user_id,
+        c.label,
+        c.certificate_ref,
+        c.profile_ref,
+        c.p12_password_encrypted,
+        c.status
+      FROM certificates c
+      WHERE c.id = $1
+        AND c.status = 'active'
+      LIMIT 1
+      `,
+      [certificateID]
+    );
+
+  if (!result.rowCount) {
+    throw new Error(
+      "Certificate not found."
+    );
+  }
+
+  const certificate =
+    result.rows[0];
+
+  if (
+    !certificate
+      .p12_password_encrypted
+  ) {
+    throw new Error(
+      "P12 password is not configured for this certificate."
+    );
+  }
+
+  const password =
+    decryptP12Password(
+      certificate.p12_password_encrypted
+    );
+
+  return {
+    id: certificate.id,
+    userId:
+      certificate.user_id,
+    label:
+      certificate.label,
+    certificateRef:
+      certificate.certificate_ref,
+    profileRef:
+      certificate.profile_ref,
+    p12Password:
+      password,
+  };
+}
+
+/* =========================================================
+   DATABASE SCHEMA
+========================================================= */
 
 async function ensureSchema() {
   try {
-    const schemaPath = path.resolve(
-      process.cwd(),
-      "schema.sql"
-    );
+    const schemaPath =
+      path.resolve(
+        process.cwd(),
+        "schema.sql"
+      );
 
-    if (fs.existsSync(schemaPath)) {
+    if (
+      fs.existsSync(
+        schemaPath
+      )
+    ) {
       const schema =
         await fs.promises.readFile(
           schemaPath,
           "utf8"
         );
 
-      if (schema.trim()) {
-        await db.query(schema);
+      if (
+        schema.trim()
+      ) {
+        await db.query(
+          schema
+        );
       }
     }
+
+    /*
+     * Apps
+     */
 
     await db.query(`
       ALTER TABLE apps
@@ -244,9 +386,7 @@ async function ensureSchema() {
 
       ALTER TABLE apps
       ADD COLUMN IF NOT EXISTS ipa_size BIGINT;
-    `);
 
-    await db.query(`
       ALTER TABLE apps
       ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true;
 
@@ -260,22 +400,34 @@ async function ensureSchema() {
       ADD COLUMN IF NOT EXISTS source_url TEXT;
     `);
 
+    /*
+     * Certificates
+     */
+
     await db.query(`
       ALTER TABLE certificates
-      ADD COLUMN IF NOT EXISTS password_encrypted TEXT;
+      ADD COLUMN IF NOT EXISTS
+        p12_password_encrypted TEXT;
     `);
+
+    /*
+     * بيانات التطبيقات القديمة
+     */
 
     await db.query(`
       UPDATE apps
       SET
         bundle_id =
           COALESCE(
-            NULLIF(bundle_id, ''),
+            NULLIF(
+              bundle_id,
+              ''
+            ),
             'com.storeplus.legacy'
           ),
         source_url =
           COALESCE(
-            NULLIF(source_url, ''),
+            source_url,
             ''
           )
       WHERE
@@ -296,23 +448,31 @@ async function ensureSchema() {
   }
 }
 
-/* =========================
-   Initial Admin
-========================= */
+/* =========================================================
+   INITIAL ADMIN
+========================================================= */
 
 async function ensureAdmin() {
   try {
     const username =
-      process.env.ADMIN_USERNAME?.trim();
+      process.env
+        .ADMIN_USERNAME
+        ?.trim();
 
     const password =
-      process.env.ADMIN_PASSWORD;
+      process.env
+        .ADMIN_PASSWORD;
 
     const name =
-      process.env.ADMIN_NAME?.trim() ||
+      process.env
+        .ADMIN_NAME
+        ?.trim() ||
       "Administrator";
 
-    if (!username || !password) {
+    if (
+      !username ||
+      !password
+    ) {
       console.log(
         "ADMIN_USERNAME / ADMIN_PASSWORD not configured."
       );
@@ -320,7 +480,9 @@ async function ensureAdmin() {
       return;
     }
 
-    if (password.length < 8) {
+    if (
+      password.length < 8
+    ) {
       console.error(
         "ADMIN_PASSWORD must be at least 8 characters."
       );
@@ -339,7 +501,9 @@ async function ensureAdmin() {
         [username]
       );
 
-    if (existing.rowCount) {
+    if (
+      existing.rowCount
+    ) {
       console.log(
         `Admin user "${username}" already exists.`
       );
@@ -390,9 +554,9 @@ async function ensureAdmin() {
   }
 }
 
-/* =========================
-   Authentication
-========================= */
+/* =========================================================
+   AUTHENTICATION
+========================================================= */
 
 const auth = (
   req: Req,
@@ -401,7 +565,9 @@ const auth = (
 ) => {
   try {
     const authorization =
-      req.header("authorization") || "";
+      req.header(
+        "authorization"
+      ) || "";
 
     const token =
       authorization
@@ -413,27 +579,30 @@ const auth = (
 
     if (!token) {
       return res.status(401).json({
-        error: "unauthorized",
+        error:
+          "unauthorized",
       });
     }
 
     req.user =
       jwt.verify(
         token,
-        process.env.JWT_SECRET!
+        process.env
+          .JWT_SECRET!
       );
 
     return next();
   } catch {
     return res.status(401).json({
-      error: "unauthorized",
+      error:
+        "unauthorized",
     });
   }
 };
 
-/* =========================
-   Admin Middleware
-========================= */
+/* =========================================================
+   ADMIN MIDDLEWARE
+========================================================= */
 
 const admin = (
   req: Req,
@@ -441,19 +610,21 @@ const admin = (
   next: express.NextFunction
 ) => {
   if (
-    req.user?.role === "admin"
+    req.user?.role ===
+    "admin"
   ) {
     return next();
   }
 
   return res.status(403).json({
-    error: "admin_required",
+    error:
+      "admin_required",
   });
 };
 
-/* =========================
-   Health
-========================= */
+/* =========================================================
+   HEALTH
+========================================================= */
 
 app.get(
   "/api/health",
@@ -465,7 +636,8 @@ app.get(
 
       return res.json({
         ok: true,
-        version: "12.0.0",
+        version:
+          "12.0.0",
       });
     } catch (error) {
       console.error(
@@ -480,13 +652,16 @@ app.get(
   }
 );
 
-/* =========================
-   Login
-========================= */
+/* =========================================================
+   LOGIN
+========================================================= */
 
 app.post(
   "/api/login",
-  async (req, res) => {
+  async (
+    req,
+    res
+  ) => {
     try {
       const username =
         String(
@@ -527,7 +702,9 @@ app.post(
           [username]
         );
 
-      if (!result.rowCount) {
+      if (
+        !result.rowCount
+      ) {
         return res.status(401).json({
           error:
             "invalid_credentials",
@@ -556,9 +733,11 @@ app.post(
             id: user.id,
             role: user.role,
           },
-          process.env.JWT_SECRET!,
+          process.env
+            .JWT_SECRET!,
           {
-            expiresIn: "30d",
+            expiresIn:
+              "30d",
           }
         );
 
@@ -566,11 +745,17 @@ app.post(
         token,
 
         user: {
-          id: user.id,
+          id:
+            user.id,
+
           username:
             user.username,
-          name: user.name,
-          role: user.role,
+
+          name:
+            user.name,
+
+          role:
+            user.role,
         },
       });
     } catch (error) {
@@ -587,32 +772,44 @@ app.post(
   }
 );
 
-/* =========================
-   Public Apps
-========================= */
+/* =========================================================
+   PUBLIC APPS
+========================================================= */
 
 app.get(
   "/api/apps",
-  async (_req, res) => {
+  async (
+    _req,
+    res
+  ) => {
     try {
       const result =
-        await db.query(`
+        await db.query(
+          `
           SELECT
             id,
             name,
             version,
             description,
             category,
-            bundle_id AS "bundleId",
-            source_url AS "sourceURL",
-            icon_url AS "iconURL",
+
+            bundle_id
+              AS "bundleId",
+
+            source_url
+              AS "sourceURL",
+
+            icon_url
+              AS "iconURL",
+
             featured,
 
             CASE
               WHEN ipa_ref IS NOT NULL
               THEN true
               ELSE false
-            END AS "hasIPA",
+            END
+              AS "hasIPA",
 
             ipa_original_name
               AS "ipaName",
@@ -629,7 +826,8 @@ app.get(
           ORDER BY
             featured DESC,
             updated_at DESC
-        `);
+          `
+        );
 
       return res.json(
         result.rows
@@ -648,27 +846,38 @@ app.get(
   }
 );
 
-/* =========================
-   Admin Apps List
-========================= */
+/* =========================================================
+   ADMIN APPS LIST
+========================================================= */
 
 app.get(
   "/api/admin/apps",
   auth,
   admin,
-  async (_req, res) => {
+  async (
+    _req,
+    res
+  ) => {
     try {
       const result =
-        await db.query(`
+        await db.query(
+          `
           SELECT
             id,
             name,
             version,
             description,
             category,
-            bundle_id AS "bundleId",
-            source_url AS "sourceURL",
-            icon_url AS "iconURL",
+
+            bundle_id
+              AS "bundleId",
+
+            source_url
+              AS "sourceURL",
+
+            icon_url
+              AS "iconURL",
+
             featured,
             active,
 
@@ -687,7 +896,8 @@ app.get(
 
           ORDER BY
             updated_at DESC
-        `);
+          `
+        );
 
       return res.json(
         result.rows
@@ -706,16 +916,20 @@ app.get(
   }
 );
 
-/* =========================
-   IPA Upload
-========================= */
+/* =========================================================
+   IPA UPLOAD
+========================================================= */
 
 const ipaUpload =
   multer({
     storage:
       multer.diskStorage({
         destination:
-          (_req, _file, cb) => {
+          (
+            _req,
+            _file,
+            cb
+          ) => {
             cb(
               null,
               path.join(
@@ -726,7 +940,11 @@ const ipaUpload =
           },
 
         filename:
-          (_req, file, cb) => {
+          (
+            _req,
+            file,
+            cb
+          ) => {
             const extension =
               path.extname(
                 file.originalname ||
@@ -754,7 +972,11 @@ const ipaUpload =
     },
 
     fileFilter:
-      (_req, file, cb) => {
+      (
+        _req,
+        file,
+        cb
+      ) => {
         const extension =
           path.extname(
             file.originalname ||
@@ -762,7 +984,8 @@ const ipaUpload =
           ).toLowerCase();
 
         if (
-          extension !== ".ipa"
+          extension !==
+          ".ipa"
         ) {
           return cb(
             new Error(
@@ -778,9 +1001,9 @@ const ipaUpload =
       },
   });
 
-/* =========================
-   Add App
-========================= */
+/* =========================================================
+   ADD APP
+========================================================= */
 
 app.post(
   "/api/admin/apps",
@@ -884,7 +1107,9 @@ app.post(
         !bundleId ||
         !ipa
       ) {
-        if (ipa?.path) {
+        if (
+          ipa?.path
+        ) {
           await fs.promises
             .unlink(
               ipa.path
@@ -925,7 +1150,9 @@ app.post(
           bundleId
         )
       ) {
-        if (ipa?.path) {
+        if (
+          ipa?.path
+        ) {
           await fs.promises
             .unlink(
               ipa.path
@@ -997,16 +1224,27 @@ app.post(
             version,
             description,
             category,
-            bundle_id AS "bundleId",
-            source_url AS "sourceURL",
-            icon_url AS "iconURL",
+
+            bundle_id
+              AS "bundleId",
+
+            source_url
+              AS "sourceURL",
+
+            icon_url
+              AS "iconURL",
+
             featured,
             active,
+
             ipa_original_name
               AS "ipaName",
+
             ipa_size
               AS "ipaSize",
-            true AS "hasIPA"
+
+            true
+              AS "hasIPA"
           `,
           [
             name,
@@ -1015,7 +1253,8 @@ app.post(
             category,
             bundleId,
             sourceURL,
-            iconURL || null,
+            iconURL ||
+              null,
             featured,
             ipaRef,
             ipa.originalname,
@@ -1034,7 +1273,9 @@ app.post(
         error
       );
 
-      if (ipa?.path) {
+      if (
+        ipa?.path
+      ) {
         await fs.promises
           .unlink(
             ipa.path
@@ -1057,9 +1298,9 @@ app.post(
   }
 );
 
-/* =========================
-   Direct IPA File
-========================= */
+/* =========================================================
+   DIRECT IPA FILE
+========================================================= */
 
 app.get(
   "/api/files/apps/:filename",
@@ -1120,9 +1361,9 @@ app.get(
   }
 );
 
-/* =========================
-   Download IPA
-========================= */
+/* =========================================================
+   DOWNLOAD IPA
+========================================================= */
 
 app.get(
   "/api/apps/:id/ipa",
@@ -1153,7 +1394,9 @@ app.get(
           ]
         );
 
-      if (!result.rowCount) {
+      if (
+        !result.rowCount
+      ) {
         return res.status(404).json({
           error:
             "ipa_not_found",
@@ -1217,9 +1460,9 @@ app.get(
   }
 );
 
-/* =========================
-   Delete App
-========================= */
+/* =========================================================
+   DELETE APP
+========================================================= */
 
 app.delete(
   "/api/admin/apps/:id",
@@ -1247,7 +1490,9 @@ app.delete(
           ]
         );
 
-      if (!result.rowCount) {
+      if (
+        !result.rowCount
+      ) {
         return res.status(404).json({
           error:
             "app_not_found",
@@ -1268,7 +1513,9 @@ app.delete(
         ]
       );
 
-      if (ipaRef) {
+      if (
+        ipaRef
+      ) {
         const ipaPath =
           path.join(
             root,
@@ -1304,9 +1551,9 @@ app.delete(
   }
 );
 
-/* =========================
-   Install App
-========================= */
+/* =========================================================
+   INSTALL APP
+========================================================= */
 
 app.post(
   "/api/install",
@@ -1336,15 +1583,11 @@ app.post(
           `
           SELECT
             id,
-            certificate_ref,
-            profile_ref,
-            password_encrypted
+            p12_password_encrypted
           FROM certificates
 
           WHERE user_id = $1
             AND status = 'active'
-
-          ORDER BY created_at DESC
 
           LIMIT 1
           `,
@@ -1353,66 +1596,29 @@ app.post(
           ]
         );
 
-      if (!certificate.rowCount) {
+      if (
+        !certificate.rowCount
+      ) {
         return res.status(409).json({
           error:
             "certificate_not_linked",
         });
       }
 
-      const certificateData =
-        certificate.rows[0];
-
       /*
-       * لا يمكن بدء عملية التوقيع
-       * إذا كانت الشهادة القديمة
-       * لا تحتوي كلمة مرور.
+       * التأكد أن كلمة مرور P12
+       * موجودة قبل إنشاء مهمة التوقيع.
        */
       if (
-        !certificateData
-          .password_encrypted
+        !certificate.rows[0]
+          .p12_password_encrypted
       ) {
         return res.status(409).json({
           error:
             "certificate_password_missing",
 
           message:
-            "الشهادة المرتبطة بهذا المستخدم لا تحتوي على كلمة مرور P12. يجب إعادة رفع الشهادة مع كلمة المرور.",
-        });
-      }
-
-      /*
-       * نفك التشفير داخل السيرفر فقط.
-       *
-       * كلمة المرور لا يتم إرسالها
-       * إلى العميل.
-       */
-      let certificatePassword: string;
-
-      try {
-        certificatePassword =
-          decryptCertificatePassword(
-            certificateData
-              .password_encrypted
-          );
-      } catch (error) {
-        console.error(
-          "Certificate password decrypt error:",
-          error
-        );
-
-        return res.status(500).json({
-          error:
-            "certificate_password_decrypt_failed",
-        });
-      }
-
-      if (
-        !certificatePassword
-      ) {
-        return res.status(409).json({
-          error:
-            "certificate_password_empty",
+            "كلمة مرور شهادة P12 غير موجودة.",
         });
       }
 
@@ -1425,6 +1631,7 @@ app.post(
             version,
             bundle_id,
             ipa_ref
+
           FROM apps
 
           WHERE id = $1
@@ -1437,18 +1644,18 @@ app.post(
           ]
         );
 
-      if (!appResult.rowCount) {
+      if (
+        !appResult.rowCount
+      ) {
         return res.status(404).json({
           error:
             "app_not_found",
         });
       }
 
-      const appData =
-        appResult.rows[0];
-
       if (
-        !appData.ipa_ref
+        !appResult.rows[0]
+          .ipa_ref
       ) {
         return res.status(409).json({
           error:
@@ -1457,14 +1664,12 @@ app.post(
       }
 
       /*
-       * ملاحظة:
-       * certificatePassword لا يتم
-       * إرجاعه للعميل.
+       * نحفظ رقم الشهادة فقط.
        *
-       * يتم استخدامه لاحقًا داخل
-       * Signing Worker.
+       * كلمة المرور لا توضع في install_jobs.
+       * سيتم استرجاعها من certificates
+       * عند بدء عملية التوقيع.
        */
-
       const job =
         await db.query(
           `
@@ -1495,20 +1700,11 @@ app.post(
           `,
           [
             req.user.id,
-
-            appData.id,
-
-            certificateData.id,
+            appID,
+            certificate.rows[0]
+              .id,
           ]
         );
-
-      /*
-       * نستخدم المتغير هنا للتأكد
-       * أن كلمة المرور تم فك تشفيرها
-       * بنجاح، ولكن لا نسجلها
-       * في الـlogs ولا نرسلها للعميل.
-       */
-      void certificatePassword;
 
       return res.status(202).json(
         job.rows[0]
@@ -1527,9 +1723,9 @@ app.post(
   }
 );
 
-/* =========================
-   Install Status
-========================= */
+/* =========================================================
+   INSTALL STATUS
+========================================================= */
 
 app.get(
   "/api/install/:id",
@@ -1546,18 +1742,20 @@ app.get(
             j.id,
             j.status,
             j.message,
+
             j.install_url
               AS "installURL",
+
             a.name
               AS "appName",
-            a.version,
-            a.bundle_id
-              AS "bundleId"
+
+            a.version
 
           FROM install_jobs j
 
           JOIN apps a
-            ON a.id = j.app_id
+            ON a.id =
+              j.app_id
 
           WHERE j.id = $1
             AND j.user_id = $2
@@ -1568,7 +1766,9 @@ app.get(
           ]
         );
 
-      if (!result.rowCount) {
+      if (
+        !result.rowCount
+      ) {
         return res.status(404).json({
           error:
             "job_not_found",
@@ -1592,9 +1792,9 @@ app.get(
   }
 );
 
-/* =========================
-   Admin Stats
-========================= */
+/* =========================================================
+   ADMIN STATS
+========================================================= */
 
 app.get(
   "/api/admin/stats",
@@ -1613,34 +1813,54 @@ app.get(
       ] =
         await Promise.all([
           db.query(
-            "SELECT count(*)::int AS n FROM users"
+            `
+            SELECT
+              count(*)::int AS n
+            FROM users
+            `
           ),
 
           db.query(
-            "SELECT count(*)::int AS n FROM apps"
+            `
+            SELECT
+              count(*)::int AS n
+            FROM apps
+            `
           ),
 
           db.query(
-            "SELECT count(*)::int AS n FROM downloads"
+            `
+            SELECT
+              count(*)::int AS n
+            FROM downloads
+            `
           ),
 
           db.query(
-            "SELECT count(*)::int AS n FROM install_jobs"
+            `
+            SELECT
+              count(*)::int AS n
+            FROM install_jobs
+            `
           ),
         ]);
 
       return res.json({
         users:
-          users.rows[0].n,
+          users.rows[0]
+            .n,
 
         apps:
-          apps.rows[0].n,
+          apps.rows[0]
+            .n,
 
         downloads:
-          downloads.rows[0].n,
+          downloads.rows[0]
+            .n,
 
         installJobs:
-          installJobs.rows[0].n,
+          installJobs.rows[0]
+            .n,
       });
     } catch (error) {
       console.error(
@@ -1656,9 +1876,9 @@ app.get(
   }
 );
 
-/* =========================
-   Certificate Upload
-========================= */
+/* =========================================================
+   CERTIFICATE UPLOAD
+========================================================= */
 
 const certificateUpload =
   multer({
@@ -1677,6 +1897,7 @@ const certificateUpload =
 
 app.post(
   "/api/admin/certificates/upload",
+
   auth,
   admin,
 
@@ -1685,8 +1906,10 @@ app.post(
       name: "p12",
       maxCount: 1,
     },
+
     {
-      name: "mobileprovision",
+      name:
+        "mobileprovision",
       maxCount: 1,
     },
   ]),
@@ -1709,7 +1932,8 @@ app.post(
         files?.p12?.[0];
 
       const mobileprovision =
-        files?.mobileprovision?.[0];
+        files
+          ?.mobileprovision?.[0];
 
       const userID =
         String(
@@ -1717,9 +1941,15 @@ app.post(
             ""
         ).trim();
 
-      const certificatePassword =
+      /*
+       * كلمة مرور P12 الجديدة.
+       */
+      const p12Password =
         String(
-          req.body?.password ||
+          req.body
+            ?.p12Password ||
+            req.body
+              ?.p12_password ||
             ""
         );
 
@@ -1732,31 +1962,34 @@ app.post(
       if (
         !userID ||
         !p12 ||
-        !mobileprovision ||
-        !certificatePassword
+        !mobileprovision
       ) {
         return res.status(400).json({
           error:
             "missing_fields",
 
-          required: {
-            userID:
-              !userID,
-
-            p12:
-              !p12,
-
-            mobileprovision:
-              !mobileprovision,
-
-            password:
-              !certificatePassword,
-          },
+          message:
+            "يجب تحديد المستخدم وملف P12 وملف MobileProvision.",
         });
       }
 
       /*
-       * تأكد أن المستخدم موجود.
+       * كلمة المرور مطلوبة.
+       */
+      if (
+        !p12Password
+      ) {
+        return res.status(400).json({
+          error:
+            "p12_password_required",
+
+          message:
+            "يجب إدخال كلمة مرور ملف P12.",
+        });
+      }
+
+      /*
+       * نتأكد أن المستخدم موجود.
        */
       const userResult =
         await db.query(
@@ -1774,7 +2007,9 @@ app.post(
           ]
         );
 
-      if (!userResult.rowCount) {
+      if (
+        !userResult.rowCount
+      ) {
         return res.status(404).json({
           error:
             "user_not_found",
@@ -1782,17 +2017,27 @@ app.post(
       }
 
       /*
-       * نلغي الشهادة السابقة
+       * تشفير كلمة المرور.
+       */
+      const encryptedPassword =
+        encryptP12Password(
+          p12Password
+        );
+
+      /*
+       * إلغاء الشهادة القديمة
        * لهذا المستخدم فقط.
        */
       await db.query(
         `
         UPDATE certificates
 
-        SET status = 'revoked'
+        SET status =
+          'revoked'
 
         WHERE user_id = $1
-          AND status = 'active'
+          AND status =
+            'active'
         `,
         [
           userID,
@@ -1806,8 +2051,7 @@ app.post(
         crypto.randomUUID();
 
       /*
-       * نخزن ملفات الشهادة
-       * بأسماء عشوائية.
+       * حفظ P12.
        */
       await fs.promises.writeFile(
         path.join(
@@ -1818,6 +2062,9 @@ app.post(
         p12.buffer
       );
 
+      /*
+       * حفظ MobileProvision.
+       */
       await fs.promises.writeFile(
         path.join(
           root,
@@ -1828,14 +2075,9 @@ app.post(
       );
 
       /*
-       * تشفير كلمة مرور P12
-       * قبل تخزينها في قاعدة البيانات.
+       * حفظ الشهادة مع كلمة المرور
+       * المشفرة.
        */
-      const encryptedPassword =
-        encryptCertificatePassword(
-          certificatePassword
-        );
-
       const result =
         await db.query(
           `
@@ -1845,7 +2087,7 @@ app.post(
             label,
             certificate_ref,
             profile_ref,
-            password_encrypted,
+            p12_password_encrypted,
             status
           )
 
@@ -1861,49 +2103,37 @@ app.post(
 
           RETURNING
             id,
-            user_id,
+            user_id
+              AS "userId",
             label,
-            certificate_ref,
-            profile_ref,
+            certificate_ref
+              AS "certificateRef",
+            profile_ref
+              AS "profileRef",
             status,
             created_at
+              AS "createdAt"
           `,
           [
             userID,
-
             label,
-
             certificateRef,
-
             profileRef,
-
             encryptedPassword,
           ]
         );
 
       /*
-       * لا نرجع كلمة المرور
-       * ولا النسخة المشفرة للعميل.
+       * مهم:
+       * لا نعيد كلمة المرور
+       * في JSON.
        */
       return res.status(201).json({
         ok: true,
-
-        certificate: {
-          id:
-            result.rows[0].id,
-
-          userID:
-            result.rows[0].user_id,
-
-          label:
-            result.rows[0].label,
-
-          status:
-            result.rows[0].status,
-
-          createdAt:
-            result.rows[0].created_at,
-        },
+        certificate:
+          result.rows[0],
+        message:
+          "تم حفظ الشهادة وكلمة مرور P12 المشفرة بنجاح.",
       });
     } catch (error) {
       console.error(
@@ -1924,9 +2154,9 @@ app.post(
   }
 );
 
-/* =========================
-   Admin Users
-========================= */
+/* =========================================================
+   ADMIN USERS
+========================================================= */
 
 app.get(
   "/api/admin/users",
@@ -1938,7 +2168,8 @@ app.get(
   ) => {
     try {
       const result =
-        await db.query(`
+        await db.query(
+          `
           SELECT
             u.id,
             u.username,
@@ -1955,13 +2186,15 @@ app.get(
 
                 AND c.status =
                   'active'
-            ) AS "hasCertificate"
+            )
+              AS "hasCertificate"
 
           FROM users u
 
           ORDER BY
             created_at DESC
-        `);
+          `
+        );
 
       return res.json(
         result.rows
@@ -1980,12 +2213,17 @@ app.get(
   }
 );
 
-/* =========================
-   Admin Certificate Info
-========================= */
+/* =========================================================
+   ADMIN CERTIFICATE INFO
+========================================================= */
+
+/*
+ * هذا endpoint يعرض حالة الشهادة
+ * فقط، ولا يعرض كلمة المرور.
+ */
 
 app.get(
-  "/api/admin/users/:id/certificate",
+  "/api/admin/certificates/:userID",
   auth,
   admin,
   async (
@@ -1997,45 +2235,45 @@ app.get(
         await db.query(
           `
           SELECT
-            c.id,
-            c.user_id
-              AS "userID",
-            c.label,
-            c.status,
-            c.created_at
-              AS "createdAt",
+            id,
+            user_id
+              AS "userId",
+
+            label,
+
+            certificate_ref
+              AS "certificateRef",
+
+            profile_ref
+              AS "profileRef",
+
+            status,
 
             CASE
-              WHEN c.password_encrypted
+              WHEN p12_password_encrypted
                 IS NOT NULL
               THEN true
               ELSE false
-            END AS "hasPassword"
+            END
+              AS "hasP12Password",
 
-          FROM certificates c
+            created_at
+              AS "createdAt"
 
-          WHERE c.user_id = $1
-            AND c.status = 'active'
+          FROM certificates
+
+          WHERE user_id = $1
 
           ORDER BY
-            c.created_at DESC
-
-          LIMIT 1
+            created_at DESC
           `,
           [
-            req.params.id,
+            req.params.userID,
           ]
         );
 
-      if (!result.rowCount) {
-        return res.status(404).json({
-          error:
-            "certificate_not_found",
-        });
-      }
-
       return res.json(
-        result.rows[0]
+        result.rows
       );
     } catch (error) {
       console.error(
@@ -2051,9 +2289,9 @@ app.get(
   }
 );
 
-/* =========================
+/* =========================================================
    API 404
-========================= */
+========================================================= */
 
 app.use(
   "/api",
@@ -2068,9 +2306,9 @@ app.use(
   }
 );
 
-/* =========================
-   Errors
-========================= */
+/* =========================================================
+   ERROR HANDLER
+========================================================= */
 
 app.use(
   (
@@ -2094,10 +2332,10 @@ app.use(
       ) {
         return res.status(413).json({
           error:
-            "ipa_file_too_large",
+            "file_too_large",
 
           message:
-            "حجم الملف أكبر من الحد المسموح به وهو 1GB.",
+            "حجم الملف أكبر من الحد المسموح به.",
         });
       }
 
@@ -2129,14 +2367,14 @@ app.use(
 
       message:
         error?.message ||
-        "Unknown error",
+        "Unknown server error",
     });
   }
 );
 
-/* =========================
-   Start Server
-========================= */
+/* =========================================================
+   START SERVER
+========================================================= */
 
 const PORT =
   Number(
@@ -2145,6 +2383,21 @@ const PORT =
   );
 
 async function startServer() {
+  /*
+   * تأكد من وجود مفتاح التشفير
+   * قبل تشغيل السيرفر.
+   */
+  if (
+    !process.env
+      .P12_ENCRYPTION_KEY
+  ) {
+    console.error(
+      "P12_ENCRYPTION_KEY is missing from .env"
+    );
+
+    process.exit(1);
+  }
+
   await ensureSchema();
 
   await ensureAdmin();
@@ -2159,6 +2412,10 @@ async function startServer() {
 
       console.log(
         `Storage root: ${root}`
+      );
+
+      console.log(
+        "P12 password encryption: enabled"
       );
     }
   );
