@@ -1,0 +1,161 @@
+name: iOS Signing Worker
+
+on:
+  repository_dispatch:
+    types:
+      - sign_ipa
+
+concurrency:
+  group: ios-signing-${{ github.event.client_payload.job_id }}
+  cancel-in-progress: false
+
+jobs:
+  sign:
+    name: Sign IPA
+    runs-on: macos-latest
+
+    permissions:
+      contents: read
+
+    env:
+      API_BASE_URL: ${{ secrets.SIGNING_API_BASE_URL }}
+      WORKER_SECRET: ${{ secrets.SIGNING_WORKER_SECRET }}
+      JOB_ID: ${{ github.event.client_payload.job_id }}
+      WORKER_TOKEN: ${{ github.event.client_payload.worker_token }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check environment
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -n "$API_BASE_URL"
+          test -n "$WORKER_SECRET"
+          test -n "$JOB_ID"
+          test -n "$WORKER_TOKEN"
+
+          echo "Worker environment OK."
+
+      - name: Download signing job
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$RUNNER_TEMP/signing"
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --location \
+            --retry 3 \
+            --header "Authorization: Bearer ${WORKER_TOKEN}" \
+            "${API_BASE_URL}/api/worker/jobs/${JOB_ID}/input" \
+            --output "$RUNNER_TEMP/signing/job.json"
+
+          test -s "$RUNNER_TEMP/signing/job.json"
+
+          echo "Signing job downloaded."
+
+      - name: Prepare signing files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import json
+          import base64
+          import os
+
+          base = os.path.join(
+              os.environ["RUNNER_TEMP"],
+              "signing"
+          )
+
+          with open(
+              os.path.join(base, "job.json"),
+              "r",
+              encoding="utf-8"
+          ) as f:
+              data = json.load(f)
+
+          required = [
+              "ipaBase64",
+              "p12Base64",
+              "mobileprovisionBase64",
+              "p12Password"
+          ]
+
+          for key in required:
+              if not data.get(key):
+                  raise SystemExit(
+                      f"Missing required field: {key}"
+                  )
+
+          def write_b64(name, value):
+              with open(
+                  os.path.join(base, name),
+                  "wb"
+              ) as f:
+                  f.write(base64.b64decode(value))
+
+          write_b64("input.ipa", data["ipaBase64"])
+          write_b64("certificate.p12", data["p12Base64"])
+          write_b64(
+              "profile.mobileprovision",
+              data["mobileprovisionBase64"]
+          )
+
+          with open(
+              os.path.join(base, "p12-password"),
+              "w",
+              encoding="utf-8"
+          ) as f:
+              f.write(data["p12Password"])
+
+          print("Signing files prepared.")
+          PY
+
+          chmod 600 "$RUNNER_TEMP/signing/p12-password"
+          chmod 600 "$RUNNER_TEMP/signing/certificate.p12"
+
+      - name: Sign IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          chmod +x ./worker/sign-ipa.sh
+
+          ./worker/sign-ipa.sh \
+            "$RUNNER_TEMP/signing/input.ipa" \
+            "$RUNNER_TEMP/signing/certificate.p12" \
+            "$RUNNER_TEMP/signing/p12-password" \
+            "$RUNNER_TEMP/signing/profile.mobileprovision" \
+            "$RUNNER_TEMP/signing/output.ipa"
+
+      - name: Upload signed IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --location \
+            --request POST \
+            --header "Authorization: Bearer ${WORKER_TOKEN}" \
+            --header "Content-Type: application/octet-stream" \
+            --data-binary @"$RUNNER_TEMP/signing/output.ipa" \
+            "${API_BASE_URL}/api/worker/jobs/${JOB_ID}/result"
+
+          echo "Signed IPA uploaded."
+
+      - name: Secure cleanup
+        if: always()
+        shell: bash
+        run: |
+          rm -rf "$RUNNER_TEMP/signing" || true
